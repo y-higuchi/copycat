@@ -16,16 +16,21 @@
 package net.kuujo.copycat;
 
 import java.util.Set;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import net.kuujo.copycat.cluster.Member;
 import net.kuujo.copycat.log.Entry;
-import net.kuujo.copycat.protocol.AppendEntriesRequest;
-import net.kuujo.copycat.protocol.AppendEntriesResponse;
 import net.kuujo.copycat.protocol.ProtocolClient;
 import net.kuujo.copycat.protocol.RequestVoteRequest;
 import net.kuujo.copycat.protocol.RequestVoteResponse;
 import net.kuujo.copycat.util.Quorum;
+
+import com.google.common.base.Function;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Candidate state.<p>
@@ -41,7 +46,7 @@ import net.kuujo.copycat.util.Quorum;
 class Candidate extends BaseState {
   private static final Logger logger = Logger.getLogger(Candidate.class.getCanonicalName());
   private Quorum quorum;
-  private long currentTimer;
+  private ScheduledFuture<Void> currentTimer;
 
   @Override
   public void init(CopyCatContext context) {
@@ -55,15 +60,17 @@ class Candidate extends BaseState {
    */
   private synchronized void resetTimer() {
     // Cancel the current timer task and purge the election timer of cancelled tasks.
-    context.cancelTimer(currentTimer);
+    if (currentTimer != null) {
+      currentTimer.cancel(true);
+    }
 
     // When the election timer is reset, increment the current term and
     // restart the election.
     context.setCurrentTerm(context.getCurrentTerm() + 1);
     long delay = context.config().getElectionTimeout() - (context.config().getElectionTimeout() / 4) + (Math.round(Math.random() * (context.config().getElectionTimeout() / 2)));
-    currentTimer = context.startTimer(delay, new Callback<Long>() {
+    currentTimer = context.config().getTimerStrategy().startTimer(new Runnable() {
       @Override
-      public void call(Long id) {
+      public void run() {
         // When the election times out, clear the previous majority vote
         // check and restart the election.
         logger.info(String.format("%s election timed out", context.cluster.config().getLocalMember()));
@@ -74,7 +81,7 @@ class Candidate extends BaseState {
         resetTimer();
         logger.info(String.format("%s restarted election", context.cluster.config().getLocalMember()));
       }
-    });
+    }, delay, TimeUnit.MILLISECONDS);
     pollMembers();
   }
 
@@ -88,16 +95,16 @@ class Candidate extends BaseState {
     // indicates that another vote is already going on.
     if (quorum == null) {
       final Set<Member> pollMembers = context.cluster.members();
-      quorum = new Quorum(context.cluster.config().getQuorumSize());
-      quorum.setCallback(new Callback<Boolean>() {
+      quorum = new Quorum(context.cluster.config().getQuorumSize(), new Function<Boolean, Void>() {
         @Override
-        public void call(Boolean succeeded) {
+        public Void apply(Boolean succeeded) {
           quorum = null;
           if (succeeded) {
             context.transition(Leader.class);
           } else {
             context.transition(Follower.class);
           }
+          return null;
         }
       });
 
@@ -111,30 +118,33 @@ class Candidate extends BaseState {
       final long lastTerm = lastEntry != null ? lastEntry.term() : 0;
       for (Member member : pollMembers) {
         final ProtocolClient client = member.protocol().client();
-        client.connect(new AsyncCallback<Void>() {
+        Futures.addCallback(client.connect(), new FutureCallback<Void>() {
           @Override
-          public void call(AsyncResult<Void> result) {
-            if (result.succeeded()) {
-              client.requestVote(new RequestVoteRequest(context.nextCorrelationId(), context.getCurrentTerm(), context.cluster.config().getLocalMember(), lastIndex, lastTerm), new AsyncCallback<RequestVoteResponse>() {
-                @Override
-                public void call(AsyncResult<RequestVoteResponse> result) {
-                  client.close();
-                  if (result.succeeded()) {
-                    if (quorum != null) {
-                      if (!result.value().voteGranted()) {
-                        quorum.fail();
-                      } else {
-                        quorum.succeed();
-                      }
-                    }
-                  } else if (quorum != null) {
+          public void onFailure(Throwable atrg0) {
+            quorum.fail();
+          }
+          @Override
+          public void onSuccess(Void event) {
+            Futures.addCallback(client.requestVote(new RequestVoteRequest(context.nextCorrelationId(), context.getCurrentTerm(), context.cluster.config().getLocalMember(), lastIndex, lastTerm)), new FutureCallback<RequestVoteResponse>() {
+              @Override
+              public void onFailure(Throwable t) {
+                client.close();
+                if (quorum != null) {
+                  quorum.fail();
+                }
+              }
+              @Override
+              public void onSuccess(RequestVoteResponse response) {
+                client.close();
+                if (quorum != null) {
+                  if (response.voteGranted()) {
+                    quorum.succeed();
+                  } else {
                     quorum.fail();
                   }
                 }
-              });
-            } else if (quorum != null) {
-              quorum.fail();
-            }
+              }
+            });
           }
         });
       }
@@ -142,30 +152,30 @@ class Candidate extends BaseState {
   }
 
   @Override
-  public void appendEntries(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> responseCallback) {
-    super.appendEntries(request, responseCallback);
-  }
-
-  @Override
-  public void requestVote(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> responseCallback) {
+  public ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request) {
     // If the request indicates a term that is greater than the current term then
     // assign that term and leader to the current context and step down as leader.
     if (request.term() > context.getCurrentTerm()) {
       context.setCurrentTerm(request.term());
       context.setCurrentLeader(null);
+      context.setLastVotedFor(null);
       context.transition(Follower.class);
     }
+
     // If the vote request is not for this candidate then reject the vote.
-    else if (!request.candidate().equals(context.cluster.config().getLocalMember())) {
-      responseCallback.call(new AsyncResult<RequestVoteResponse>(new RequestVoteResponse(request.id(), context.getCurrentTerm(), false)));
+    if (!request.candidate().equals(context.cluster.config().getLocalMember())) {
+      return Futures.immediateFuture(new RequestVoteResponse(request.id(), context.getCurrentTerm(), false));
     } else {
-      super.requestVote(request, responseCallback);
+      return super.requestVote(request);
     }
   }
 
   @Override
   public synchronized void destroy() {
-    context.cancelTimer(currentTimer);
+    if (currentTimer != null) {
+      currentTimer.cancel(true);
+      currentTimer = null;
+    }
     if (quorum != null) {
       quorum.cancel();
       quorum = null;

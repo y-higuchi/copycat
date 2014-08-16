@@ -15,7 +15,7 @@
  */
 package net.kuujo.copycat.protocol;
 
-import net.kuujo.copycat.AsyncCallback;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Protocol client.
@@ -26,26 +26,16 @@ public interface ProtocolClient extends ProtocolHandler {
 
   /**
    * Connects the client.
-   */
-  void connect();
-
-  /**
-   * Connects the client.
    *
-   * @param callback A callback to be called once connected.
+   * @return A listenable future to be called once complete.
    */
-  void connect(AsyncCallback<Void> callback);
-
-  /**
-   * Closes the client.
-   */
-  void close();
+  ListenableFuture<Void> connect();
 
   /**
    * Closes the client.
    *
-   * @param callback A callback to be called once closed.
+   * @return A listenable future to be called once complete.
    */
-  void close(AsyncCallback<Void> callback);
+  ListenableFuture<Void> close();
 
 }

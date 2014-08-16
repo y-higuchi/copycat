@@ -38,8 +38,6 @@ import java.security.cert.CertificateException;
 
 import javax.net.ssl.SSLException;
 
-import net.kuujo.copycat.AsyncCallback;
-import net.kuujo.copycat.AsyncResult;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
 import net.kuujo.copycat.protocol.ProtocolHandler;
@@ -49,6 +47,11 @@ import net.kuujo.copycat.protocol.RequestVoteRequest;
 import net.kuujo.copycat.protocol.RequestVoteResponse;
 import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
+
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 
 /**
  * Netty TCP protocol server.
@@ -70,7 +73,7 @@ public class TcpProtocolServer implements ProtocolServer {
   }
 
   @Override
-  public void start(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
     // TODO: Configure proper SSL trust store.
     final SslContext sslContext;
     if (protocol.isSsl()) {
@@ -78,10 +81,7 @@ public class TcpProtocolServer implements ProtocolServer {
         SelfSignedCertificate ssc = new SelfSignedCertificate();
         sslContext = SslContext.newServerContext(ssc.certificate(), ssc.privateKey());
       } catch (SSLException | CertificateException e) {
-        if (callback != null) {
-          callback.call(new AsyncResult<Void>(e));
-        }
-        return;
+        return Futures.immediateFailedFuture(e);
       }
     } else {
       sslContext = null;
@@ -129,45 +129,45 @@ public class TcpProtocolServer implements ProtocolServer {
     bootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
 
     // Bind and start to accept incoming connections.
+    final SettableFuture<Void> future = SettableFuture.create();
     bootstrap.bind(protocol.getHost(), protocol.getPort()).addListener(new ChannelFutureListener() {
       @Override
-      public void operationComplete(ChannelFuture future) throws Exception {
-        future.channel().closeFuture().addListener(new ChannelFutureListener() {
+      public void operationComplete(ChannelFuture channelFuture) throws Exception {
+        channelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
           @Override
           public void operationComplete(ChannelFuture future) throws Exception {
             workerGroup.shutdownGracefully();
           }
         });
 
-        if (future.isSuccess()) {
-          channel = future.channel();
-          if (callback != null) {
-            callback.call(new AsyncResult<Void>((Void) null));
-          }
-        } else if (future.cause() != null && callback != null) {
-          callback.call(new AsyncResult<Void>(future.cause()));
+        if (channelFuture.isSuccess()) {
+          channel = channelFuture.channel();
+          future.set(null);
+        } else if (channelFuture.cause() != null) {
+          future.setException(channelFuture.cause());
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void stop(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> stop() {
     if (channel != null) {
+      final SettableFuture<Void> future = SettableFuture.create();
       channel.close().addListener(new ChannelFutureListener() {
         @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
-          if (future.isSuccess()) {
-            if (callback != null) {
-              callback.call(new AsyncResult<Void>((Void) null));
-            }
-          } else if (future.cause() != null && callback != null) {
-            callback.call(new AsyncResult<Void>(future.cause()));
+        public void operationComplete(ChannelFuture channelFuture) throws Exception {
+          if (channelFuture.isSuccess()) {
+            future.set(null);
+          } else if (channelFuture.cause() != null) {
+            future.setException(channelFuture.cause());
           }
         }
       });
-    } else if (callback != null) {
-      callback.call(new AsyncResult<Void>((Void) null));
+      return future;
+    } else {
+      return Futures.immediateFuture(null);
     }
   }
 
@@ -188,12 +188,14 @@ public class TcpProtocolServer implements ProtocolServer {
         context.channel().eventLoop().submit(new Runnable() {
           @Override
           public void run() {
-            server.handler.appendEntries((AppendEntriesRequest) request, new AsyncCallback<AppendEntriesResponse>() {
+            Futures.addCallback(server.handler.appendEntries((AppendEntriesRequest) request), new FutureCallback<AppendEntriesResponse>() {
               @Override
-              public void call(AsyncResult<AppendEntriesResponse> result) {
-                if (result.succeeded()) {
-                  context.writeAndFlush(result.value());
-                }
+              public void onFailure(Throwable t) {
+                
+              }
+              @Override
+              public void onSuccess(AppendEntriesResponse response) {
+                context.writeAndFlush(response);
               }
             });
           }
@@ -202,12 +204,14 @@ public class TcpProtocolServer implements ProtocolServer {
         context.channel().eventLoop().submit(new Runnable() {
           @Override
           public void run() {
-            server.handler.requestVote((RequestVoteRequest) request, new AsyncCallback<RequestVoteResponse>() {
+            Futures.addCallback(server.handler.requestVote((RequestVoteRequest) request), new FutureCallback<RequestVoteResponse>() {
               @Override
-              public void call(AsyncResult<RequestVoteResponse> result) {
-                if (result.succeeded()) {
-                  context.writeAndFlush(result.value());
-                }
+              public void onFailure(Throwable t) {
+                
+              }
+              @Override
+              public void onSuccess(RequestVoteResponse response) {
+                context.writeAndFlush(response);
               }
             });
           }
@@ -216,12 +220,14 @@ public class TcpProtocolServer implements ProtocolServer {
         context.channel().eventLoop().submit(new Runnable() {
           @Override
           public void run() {
-            server.handler.submitCommand((SubmitCommandRequest) request, new AsyncCallback<SubmitCommandResponse>() {
+            Futures.addCallback(server.handler.submitCommand((SubmitCommandRequest) request), new FutureCallback<SubmitCommandResponse>() {
               @Override
-              public void call(AsyncResult<SubmitCommandResponse> result) {
-                if (result.succeeded()) {
-                  context.writeAndFlush(result.value());
-                }
+              public void onFailure(Throwable t) {
+                
+              }
+              @Override
+              public void onSuccess(SubmitCommandResponse response) {
+                context.writeAndFlush(response);
               }
             });
           }

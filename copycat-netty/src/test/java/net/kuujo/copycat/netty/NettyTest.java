@@ -22,8 +22,6 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import net.kuujo.copycat.AsyncCallback;
-import net.kuujo.copycat.AsyncResult;
 import net.kuujo.copycat.Command;
 import net.kuujo.copycat.CopyCatConfig;
 import net.kuujo.copycat.CopyCatContext;
@@ -35,6 +33,9 @@ import net.kuujo.copycat.registry.impl.ConcurrentRegistry;
 
 import org.junit.Assert;
 import org.junit.Test;
+
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
 
 /**
  * CopyCat test.
@@ -49,21 +50,22 @@ public class NettyTest {
       @Override
       public void run() throws Exception {
         Set<CopyCatContext> contexts = startCluster(3);
-        Map<String, Object> args = new HashMap<>();
-        args.put("key", "foo");
-        args.put("value", "bar");
         final CopyCatContext context = contexts.iterator().next();
-        context.submitCommand("set", args, new AsyncCallback<Void>() {
+        Futures.addCallback(context.<Void>submitCommand("set", "foo", "bar"), new FutureCallback<Void>() {
           @Override
-          public void call(AsyncResult<Void> result) {
-            Assert.assertTrue(result.succeeded());
-            Map<String, Object> args = new HashMap<>();
-            args.put("key", "foo");
-            context.submitCommand("get", args, new AsyncCallback<String>() {
+          public void onFailure(Throwable t) {
+            Assert.fail();
+          }
+          @Override
+          public void onSuccess(Void event) {
+            Futures.addCallback(context.<String>submitCommand("get", "foo"), new FutureCallback<String>() {
               @Override
-              public void call(AsyncResult<String> result) {
-                Assert.assertTrue(result.succeeded());
-                Assert.assertEquals("bar", result.value());
+              public void onFailure(Throwable t) {
+                Assert.fail();
+              }
+              @Override
+              public void onSuccess(String result) {
+                Assert.assertEquals("bar", result);
                 testComplete();
               }
             });
@@ -80,10 +82,13 @@ public class NettyTest {
     final CountDownLatch latch = new CountDownLatch(3);
     Set<CopyCatContext> contexts = createCluster(3);
     for (CopyCatContext context : contexts) {
-      context.start(new AsyncCallback<String>() {
+      Futures.addCallback(context.start(), new FutureCallback<String>() {
         @Override
-        public void call(AsyncResult<String> result) {
-          Assert.assertTrue(result.succeeded());
+        public void onFailure(Throwable t) {
+          Assert.fail();
+        }
+        @Override
+        public void onSuccess(String result) {
           latch.countDown();
         }
       });

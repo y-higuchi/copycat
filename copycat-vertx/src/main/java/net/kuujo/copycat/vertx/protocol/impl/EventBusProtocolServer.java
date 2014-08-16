@@ -19,7 +19,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import net.kuujo.copycat.AsyncCallback;
 import net.kuujo.copycat.log.Entry;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
@@ -32,6 +31,7 @@ import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
 import net.kuujo.copycat.serializer.Serializer;
 import net.kuujo.copycat.serializer.SerializerFactory;
+import net.kuujo.copycat.vertx.util.VertxFutures;
 
 import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Handler;
@@ -40,6 +40,11 @@ import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.impl.DefaultVertx;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
+
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 
 /**
  * Vert.x event bus protocol server.
@@ -101,18 +106,17 @@ public class EventBusProtocolServer implements ProtocolServer {
       }
       final Object id = message.body().getValue("id");
       AppendEntriesRequest request = new AppendEntriesRequest(id, message.body().getLong("term"), message.body().getString("leader"), message.body().getLong("prevIndex"), message.body().getLong("prevTerm"), entries, message.body().getLong("commit"));
-      requestHandler.appendEntries(request, new AsyncCallback<AppendEntriesResponse>() {
+      Futures.addCallback(requestHandler.appendEntries(request), new FutureCallback<AppendEntriesResponse>() {
         @Override
-        public void call(net.kuujo.copycat.AsyncResult<AppendEntriesResponse> result) {
-          if (result.succeeded()) {
-            AppendEntriesResponse response = result.value();
-            if (response.status().equals(Response.Status.OK)) {
-              message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putNumber("term", response.term()).putBoolean("succeeded", response.succeeded()));
-            } else {
-              message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
-            }
+        public void onFailure(Throwable t) {
+          message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", t.getMessage()));
+        }
+        @Override
+        public void onSuccess(AppendEntriesResponse response) {
+          if (response.status().equals(Response.Status.OK)) {
+            message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putNumber("term", response.term()).putBoolean("succeeded", response.succeeded()));
           } else {
-            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", result.cause().getMessage()));
+            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
           }
         }
       });
@@ -123,18 +127,17 @@ public class EventBusProtocolServer implements ProtocolServer {
     if (requestHandler != null) {
       final Object id = message.body().getValue("id");
       RequestVoteRequest request = new RequestVoteRequest(id, message.body().getLong("term"), message.body().getString("candidate"), message.body().getLong("lastIndex"), message.body().getLong("lastTerm"));
-      requestHandler.requestVote(request, new AsyncCallback<RequestVoteResponse>() {
+      Futures.addCallback(requestHandler.requestVote(request), new FutureCallback<RequestVoteResponse>() {
         @Override
-        public void call(net.kuujo.copycat.AsyncResult<RequestVoteResponse> result) {
-          if (result.succeeded()) {
-            RequestVoteResponse response = result.value();
-            if (response.status().equals(Response.Status.OK)) {
-              message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putNumber("term", response.term()).putBoolean("voteGranted", response.voteGranted()));
-            } else {
-              message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
-            }
+        public void onFailure(Throwable t) {
+          message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", t.getMessage()));
+        }
+        @Override
+        public void onSuccess(RequestVoteResponse response) {
+          if (response.status().equals(Response.Status.OK)) {
+            message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putNumber("term", response.term()).putBoolean("voteGranted", response.voteGranted()));
           } else {
-            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", result.cause().getMessage()));
+            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
           }
         }
       });
@@ -146,25 +149,24 @@ public class EventBusProtocolServer implements ProtocolServer {
     if (requestHandler != null) {
       final Object id = message.body().getValue("id");
       SubmitCommandRequest request = new SubmitCommandRequest(id, message.body().getString("command"), message.body().getArray("args").toList());
-      requestHandler.submitCommand(request, new AsyncCallback<SubmitCommandResponse>() {
+      Futures.addCallback(requestHandler.submitCommand(request), new FutureCallback<SubmitCommandResponse>() {
         @Override
-        @SuppressWarnings({"rawtypes"})
-        public void call(net.kuujo.copycat.AsyncResult<SubmitCommandResponse> result) {
-          if (result.succeeded()) {
-            SubmitCommandResponse response = result.value();
-            if (response.status().equals(Response.Status.OK)) {
-              if (response.result() instanceof Map) {
-                message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putObject("result", new JsonObject((Map) response.result())));
-              } else if (response.result() instanceof List) {
-                message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putArray("result", new JsonArray((List) response.result())));
-              } else {
-                message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putValue("result", response.result()));
-              }
+        public void onFailure(Throwable t) {
+          message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", t.getMessage()));
+        }
+        @SuppressWarnings("rawtypes")
+        @Override
+        public void onSuccess(SubmitCommandResponse response) {
+          if (response.status().equals(Response.Status.OK)) {
+            if (response.result() instanceof Map) {
+              message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putObject("result", new JsonObject((Map) response.result())));
+            } else if (response.result() instanceof List) {
+              message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putArray("result", new JsonArray((List) response.result())));
             } else {
-              message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
+              message.reply(new JsonObject().putString("status", "ok").putValue("id", id).putValue("result", response.result()));
             }
           } else {
-            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", result.cause().getMessage()));
+            message.reply(new JsonObject().putString("status", "error").putValue("id", id).putString("message", response.error().getMessage()));
           }
         }
       });
@@ -172,49 +174,26 @@ public class EventBusProtocolServer implements ProtocolServer {
   }
 
   @Override
-  public void start(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
+    final SettableFuture<Void> future = SettableFuture.create();
     if (vertx == null) {
       vertx = new DefaultVertx(port >= 0 ? port : 0, host, new Handler<AsyncResult<Vertx>>() {
         @Override
         public void handle(AsyncResult<Vertx> result) {
-          vertx.eventBus().registerHandler(address, messageHandler, new Handler<AsyncResult<Void>>() {
-            @Override
-            public void handle(AsyncResult<Void> result) {
-              if (result.failed()) {
-                callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
-              } else {
-                callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
-              }
-            }
-          });
+          vertx.eventBus().registerHandler(address, messageHandler, VertxFutures.futureToHandler(future));
         }
       });
     } else {
-      vertx.eventBus().registerHandler(address, messageHandler, new Handler<AsyncResult<Void>>() {
-        @Override
-        public void handle(AsyncResult<Void> result) {
-          if (result.failed()) {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
-          } else {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
-          }
-        }
-      });
+      vertx.eventBus().registerHandler(address, messageHandler, VertxFutures.futureToHandler(future));
     }
+    return future;
   }
 
   @Override
-  public void stop(final AsyncCallback<Void> callback) {
-    vertx.eventBus().unregisterHandler(address, messageHandler, new Handler<AsyncResult<Void>>() {
-      @Override
-      public void handle(AsyncResult<Void> result) {
-        if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
-        } else {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
-        }
-      }
-    });
+  public ListenableFuture<Void> stop() {
+    final SettableFuture<Void> future = SettableFuture.create();
+    vertx.eventBus().unregisterHandler(address, messageHandler, VertxFutures.futureToHandler(future));
+    return future;
   }
 
 }

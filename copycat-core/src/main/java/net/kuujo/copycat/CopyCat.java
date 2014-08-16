@@ -22,6 +22,10 @@ import net.kuujo.copycat.endpoint.impl.DefaultEndpointFactory;
 import net.kuujo.copycat.log.Log;
 import net.kuujo.copycat.registry.Registry;
 
+import com.google.common.base.Functions;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+
 /**
  * Primary copycat API.<p>
  *
@@ -65,38 +69,10 @@ public class CopyCat {
 
   /**
    * Starts the replica.
-   *
-   * @return The copycat instance.
    */
-  public CopyCat start() {
-    return start(null);
-  }
-
-  /**
-   * Starts the replica.
-   *
-   * @param callback A callback to be called once the replica has been started.
-   * @return The copycat instance.
-   */
-  public CopyCat start(final AsyncCallback<Void> callback) {
-    context.start(new AsyncCallback<String>() {
-      @Override
-      public void call(AsyncResult<String> result) {
-        if (result.succeeded()) {
-          callback.call(new AsyncResult<Void>((Void) null));
-        } else {
-          callback.call(new AsyncResult<Void>(result.cause()));
-        }
-      }
-    });
-    return this;
-  }
-
-  /**
-   * Stops the replica.
-   */
-  public void stop() {
-    stop(null);
+  @SuppressWarnings("unchecked")
+  public ListenableFuture<Void> start() {
+    return Futures.transform(Futures.allAsList(context.start(), endpoint.start()), Functions.<Void>constant(null));
   }
 
   /**
@@ -104,8 +80,9 @@ public class CopyCat {
    *
    * @param callback A callback to be called once the replica has been stopped.
    */
-  public void stop(final AsyncCallback<Void> callback) {
-    endpoint.stop(callback);
+  @SuppressWarnings("unchecked")
+  public ListenableFuture<Void> stop() {
+    return Futures.transform(Futures.allAsList(context.stop(), endpoint.stop()), Functions.<Void>constant(null));
   }
 
 }

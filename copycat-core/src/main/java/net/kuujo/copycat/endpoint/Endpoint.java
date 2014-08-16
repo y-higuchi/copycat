@@ -15,7 +15,7 @@
  */
 package net.kuujo.copycat.endpoint;
 
-import net.kuujo.copycat.AsyncCallback;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * CopyCat endpoint.<p>
@@ -45,17 +45,15 @@ public interface Endpoint {
    * or asynchronous. Both types of endpoints should call the
    * given callback once started.
    *
-   * @param callback An asynchronous callback to be called once the endpoint has
-   *        been started.
+   * @return A future to be called once the endpoint is started.
    */
-  void start(AsyncCallback<Void> callback);
+  ListenableFuture<Void> start();
 
   /**
    * Stops the endpoint.
    *
-   * @param callback An asynchronous callback to be called once the endpoint has
-   *        been stopped.
+   * @return A future to be called once the endpoint is stopped.
    */
-  void stop(AsyncCallback<Void> callback);
+  ListenableFuture<Void> stop();
 
 }

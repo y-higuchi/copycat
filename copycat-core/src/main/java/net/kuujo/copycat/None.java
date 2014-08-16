@@ -22,6 +22,9 @@ import net.kuujo.copycat.protocol.RequestVoteResponse;
 import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
 
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+
 /**
  * Non-existent state.<p>
  *
@@ -39,18 +42,18 @@ class None extends BaseState {
   }
 
   @Override
-  public void appendEntries(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> responseCallback) {
-    responseCallback.call(new AsyncResult<AppendEntriesResponse>(new AppendEntriesResponse(request.id(), "Replica is not alive")));
+  public ListenableFuture<AppendEntriesResponse> appendEntries(AppendEntriesRequest request) {
+    return Futures.immediateFuture(new AppendEntriesResponse(request.id(), "Replica is not alive"));
   }
 
   @Override
-  public void requestVote(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> responseCallback) {
-    responseCallback.call(new AsyncResult<RequestVoteResponse>(new RequestVoteResponse(request.id(), "Replica is not alive")));
+  public ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request) {
+    return Futures.immediateFuture(new RequestVoteResponse(request.id(), "Replica is not alive"));
   }
 
   @Override
-  public void submitCommand(SubmitCommandRequest request, AsyncCallback<SubmitCommandResponse> responseCallback) {
-    responseCallback.call(new AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), "Replica is not alive")));
+  public ListenableFuture<SubmitCommandResponse> submitCommand(SubmitCommandRequest request) {
+    return Futures.immediateFuture(new SubmitCommandResponse(request.id(), "Replica is not alive"));
   }
 
   @Override

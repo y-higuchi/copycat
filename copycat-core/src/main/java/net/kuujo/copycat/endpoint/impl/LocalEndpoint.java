@@ -15,11 +15,11 @@
  */
 package net.kuujo.copycat.endpoint.impl;
 
-import java.util.Map;
-
-import net.kuujo.copycat.AsyncCallback;
 import net.kuujo.copycat.CopyCatContext;
 import net.kuujo.copycat.endpoint.Endpoint;
+
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Direct endpoint implementation.
@@ -33,11 +33,13 @@ public class LocalEndpoint implements Endpoint {
   }
 
   @Override
-  public void start(AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
+    return Futures.immediateFuture(null);
   }
 
   @Override
-  public void stop(AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> stop() {
+    return Futures.immediateFuture(null);
   }
 
   /**
@@ -45,12 +47,10 @@ public class LocalEndpoint implements Endpoint {
    *
    * @param command The command to submit.
    * @param args The command arguments.
-   * @param callback An asynchronous callback to be called once complete.
-   * @return
+   * @return A future to be completed with the command result.
    */
-  public LocalEndpoint submitCommand(String command, Map<String, Object> args, AsyncCallback<Object> callback) {
-    context.submitCommand(command, args, callback);
-    return this;
+  public <T> ListenableFuture<T> submitCommand(String command, Object... args) {
+    return context.submitCommand(command, args);
   }
 
 }

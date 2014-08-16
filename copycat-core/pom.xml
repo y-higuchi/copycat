@@ -12,6 +12,7 @@
 
   <properties>
     <jackson.version>2.4.1</jackson.version>
+    <guava.version>17.0</guava.version>
   </properties>
 
   <dependencies>
@@ -24,6 +25,11 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
       <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>17.0</version>
     </dependency>
   </dependencies>
 </project>

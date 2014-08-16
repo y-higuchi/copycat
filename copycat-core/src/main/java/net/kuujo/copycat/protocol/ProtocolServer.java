@@ -15,7 +15,7 @@
  */
 package net.kuujo.copycat.protocol;
 
-import net.kuujo.copycat.AsyncCallback;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Protocol server.
@@ -34,15 +34,15 @@ public interface ProtocolServer {
   /**
    * Starts the server.
    *
-   * @param callback A callback to be called once complete.
+   * @return A listenable future to be called once complete.
    */
-  void start(AsyncCallback<Void> callback);
+  ListenableFuture<Void> start();
 
   /**
    * Starts the server.
    *
-   * @param callback A callback to be called once complete.
+   * @return A listenable future to be called once complete.
    */
-  void stop(AsyncCallback<Void> callback);
+  ListenableFuture<Void> stop();
 
 }

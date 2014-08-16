@@ -18,11 +18,11 @@ package net.kuujo.copycat.vertx.endpoint.impl;
 import java.util.List;
 import java.util.Map;
 
-import net.kuujo.copycat.AsyncCallback;
 import net.kuujo.copycat.CopyCatContext;
 import net.kuujo.copycat.endpoint.Endpoint;
 import net.kuujo.copycat.uri.UriHost;
 import net.kuujo.copycat.uri.UriPort;
+import net.kuujo.copycat.vertx.util.VertxFutures;
 
 import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Handler;
@@ -34,6 +34,11 @@ import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.net.NetServer;
 import org.vertx.java.core.net.NetSocket;
 import org.vertx.java.core.parsetools.RecordParser;
+
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 
 /**
  * Vert.x TCP protocol.
@@ -121,7 +126,8 @@ public class TcpEndpoint implements Endpoint {
   }
 
   @Override
-  public void start(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
+    final SettableFuture<Void> future = SettableFuture.create();
     if (server == null) {
       server = vertx.createNetServer();
     }
@@ -133,20 +139,24 @@ public class TcpEndpoint implements Endpoint {
           @Override
           public void handle(Buffer buffer) {
             JsonObject json = new JsonObject(buffer.toString());
-            context.submitCommand(json.getString("command"), json.getObject("args").toMap(), new AsyncCallback<Object>() {
+            JsonArray args = json.getArray("args");
+            if (args == null) {
+              args = new JsonArray();
+            }
+            Futures.addCallback(context.submitCommand(json.getString("command"), args.toArray()), new FutureCallback<Object>() {
               @Override
+              public void onFailure(Throwable t) {
+                socket.write(new JsonObject().putString("status", "error").putString("leader", context.leader()).putString("message", t.getMessage()).encode() + '\00');
+              }
               @SuppressWarnings({"unchecked", "rawtypes"})
-              public void call(net.kuujo.copycat.AsyncResult<Object> result) {
-                if (result.succeeded()) {
-                  if (result instanceof Map) {
-                    socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putObject("result", new JsonObject((Map) result)).encode() + '\00');
-                  } else if (result instanceof List) {
-                    socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putArray("result", new JsonArray((List) result)).encode() + '\00');
-                  } else {
-                    socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putValue("result", result).encode() + '\00');
-                  }
+              @Override
+              public void onSuccess(Object result) {
+                if (result instanceof Map) {
+                  socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putObject("result", new JsonObject((Map) result)).encode() + '\00');
+                } else if (result instanceof List) {
+                  socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putArray("result", new JsonArray((List) result)).encode() + '\00');
                 } else {
-                  socket.write(new JsonObject().putString("status", "error").putString("leader", context.leader()).putString("message", result.cause().getMessage()).encode() + '\00');
+                  socket.write(new JsonObject().putString("status", "ok").putString("leader", context.leader()).putValue("result", result).encode() + '\00');
                 }
               }
             });
@@ -157,26 +167,20 @@ public class TcpEndpoint implements Endpoint {
       @Override
       public void handle(AsyncResult<NetServer> result) {
         if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
+          future.setException(result.cause());
         } else {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+          future.set(null);
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void stop(final AsyncCallback<Void> callback) {
-    server.close(new Handler<AsyncResult<Void>>() {
-      @Override
-      public void handle(AsyncResult<Void> result) {
-        if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
-        } else {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
-        }
-      }
-    });
+  public ListenableFuture<Void> stop() {
+    final SettableFuture<Void> future = SettableFuture.create();
+    server.close(VertxFutures.futureToHandler(future));
+    return future;
   }
 
 }

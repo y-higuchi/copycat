@@ -15,8 +15,6 @@
  */
 package net.kuujo.copycat.protocol.impl;
 
-import net.kuujo.copycat.AsyncCallback;
-import net.kuujo.copycat.AsyncResult;
 import net.kuujo.copycat.CopyCatContext;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
@@ -26,6 +24,9 @@ import net.kuujo.copycat.protocol.RequestVoteRequest;
 import net.kuujo.copycat.protocol.RequestVoteResponse;
 import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
+
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Local protocol client.
@@ -42,51 +43,40 @@ public class LocalProtocolClient implements ProtocolClient {
   }
 
   @Override
-  public void appendEntries(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> callback) {
+  public ListenableFuture<AppendEntriesResponse> appendEntries(AppendEntriesRequest request) {
     LocalProtocolServer server = context.registry().lookup(address);
     if (server != null) {
-      server.sync(request, callback);
-    } else {
-      callback.call(new AsyncResult<AppendEntriesResponse>(new ProtocolException("Invalid server address")));
+      return server.appendEntries(request);
     }
+    return Futures.immediateFailedFuture(new ProtocolException("Invalid server address"));
   }
 
   @Override
-  public void requestVote(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> callback) {
+  public ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request) {
     LocalProtocolServer server = context.registry().lookup(address);
     if (server != null) {
-      server.poll(request, callback);
-    } else {
-      callback.call(new AsyncResult<RequestVoteResponse>(new ProtocolException("Invalid server address")));
+      server.requestVote(request);
     }
+    return Futures.immediateFailedFuture(new ProtocolException("Invalid server address"));
   }
 
   @Override
-  public void submitCommand(SubmitCommandRequest request, AsyncCallback<SubmitCommandResponse> callback) {
+  public ListenableFuture<SubmitCommandResponse> submitCommand(SubmitCommandRequest request) {
     LocalProtocolServer server = context.registry().lookup(address);
     if (server != null) {
-      server.submit(request, callback);
-    } else {
-      callback.call(new AsyncResult<SubmitCommandResponse>(new ProtocolException("Invalid server address")));
+      return server.submitCommand(request);
     }
+    return Futures.immediateFailedFuture(new ProtocolException("Invalid server address"));
   }
 
   @Override
-  public void connect() {
+  public ListenableFuture<Void> connect() {
+    return Futures.immediateFuture(null);
   }
 
   @Override
-  public void connect(AsyncCallback<Void> callback) {
-    callback.call(new AsyncResult<Void>((Void) null));
-  }
-
-  @Override
-  public void close() {
-  }
-
-  @Override
-  public void close(AsyncCallback<Void> callback) {
-    callback.call(new AsyncResult<Void>((Void) null));
+  public ListenableFuture<Void> close() {
+    return Futures.immediateFuture(null);
   }
 
 }

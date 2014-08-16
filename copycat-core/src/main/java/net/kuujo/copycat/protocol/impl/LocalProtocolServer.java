@@ -15,8 +15,6 @@
  */
 package net.kuujo.copycat.protocol.impl;
 
-import net.kuujo.copycat.AsyncCallback;
-import net.kuujo.copycat.AsyncResult;
 import net.kuujo.copycat.CopyCatContext;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
@@ -26,6 +24,9 @@ import net.kuujo.copycat.protocol.RequestVoteRequest;
 import net.kuujo.copycat.protocol.RequestVoteResponse;
 import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
+
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Local protocol server.
@@ -47,34 +48,37 @@ public class LocalProtocolServer implements ProtocolServer {
     this.requestHandler = handler;
   }
 
-  void sync(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> callback) {
+  ListenableFuture<AppendEntriesResponse> appendEntries(AppendEntriesRequest request) {
     if (requestHandler != null) {
-      requestHandler.appendEntries(request, callback);
+      return requestHandler.appendEntries(request);
     }
+    throw new IllegalStateException("No request handler registered");
   }
 
-  void poll(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> callback) {
+  ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request) {
     if (requestHandler != null) {
-      requestHandler.requestVote(request, callback);
+      return requestHandler.requestVote(request);
     }
+    throw new IllegalStateException("No request handler registered");
   }
 
-  void submit(SubmitCommandRequest request, AsyncCallback<SubmitCommandResponse> callback) {
+  ListenableFuture<SubmitCommandResponse> submitCommand(SubmitCommandRequest request) {
     if (requestHandler != null) {
-      requestHandler.submitCommand(request, callback);
+      return requestHandler.submitCommand(request);
     }
+    throw new IllegalStateException("No request handler registered");
   }
 
   @Override
-  public void start(AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
     context.registry().bind(address, this);
-    callback.call(new AsyncResult<Void>((Void) null));
+    return Futures.immediateFuture(null);
   }
 
   @Override
-  public void stop(AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> stop() {
     context.registry().unbind(address);
-    callback.call(new AsyncResult<Void>((Void) null));
+    return Futures.immediateFuture(null);
   }
 
 }

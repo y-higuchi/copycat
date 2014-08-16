@@ -18,11 +18,11 @@ package net.kuujo.copycat.vertx.endpoint.impl;
 import java.util.List;
 import java.util.Map;
 
-import net.kuujo.copycat.AsyncCallback;
 import net.kuujo.copycat.CopyCatContext;
 import net.kuujo.copycat.endpoint.Endpoint;
 import net.kuujo.copycat.uri.UriHost;
 import net.kuujo.copycat.uri.UriPort;
+import net.kuujo.copycat.vertx.util.VertxFutures;
 
 import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.Handler;
@@ -34,6 +34,11 @@ import org.vertx.java.core.http.RouteMatcher;
 import org.vertx.java.core.impl.DefaultVertx;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
+
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 
 /**
  * Vert.x HTTP endpoint.
@@ -124,7 +129,8 @@ public class HttpEndpoint implements Endpoint {
   }
 
   @Override
-  public void start(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> start() {
+    final SettableFuture<Void> future = SettableFuture.create();
     if (server == null) {
       server = vertx.createHttpServer();
     }
@@ -136,21 +142,20 @@ public class HttpEndpoint implements Endpoint {
         request.bodyHandler(new Handler<Buffer>() {
           @Override
           public void handle(Buffer buffer) {
-            HttpEndpoint.this.context.submitCommand(request.params().get("command"), new JsonObject(buffer.toString()).toMap(), new AsyncCallback<Object>() {
+            Futures.addCallback(HttpEndpoint.this.context.submitCommand(request.params().get("command"), new JsonArray(buffer.toString()).toArray()), new FutureCallback<Object>() {
               @Override
+              public void onFailure(Throwable t) {
+                request.response().setStatusCode(400);
+              }
               @SuppressWarnings({"unchecked", "rawtypes"})
-              public void call(net.kuujo.copycat.AsyncResult<Object> result) {
-                if (result.succeeded()) {
-                  request.response().setStatusCode(200);
-                  if (result instanceof Map) {
-                    request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putObject("result", new JsonObject((Map) result.value())).encode());                  
-                  } else if (result instanceof List) {
-                    request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putArray("result", new JsonArray((List) result.value())).encode());
-                  } else {
-                    request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putValue("result", result.value()).encode());
-                  }
+              @Override
+              public void onSuccess(Object result) {
+                if (result instanceof Map) {
+                  request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putObject("result", new JsonObject((Map) result)).encode());                  
+                } else if (result instanceof List) {
+                  request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putArray("result", new JsonArray((List) result)).encode());
                 } else {
-                  request.response().setStatusCode(400);
+                  request.response().end(new JsonObject().putString("status", "ok").putString("leader", HttpEndpoint.this.context.leader()).putValue("result", result).encode());
                 }
               }
             });
@@ -158,34 +163,29 @@ public class HttpEndpoint implements Endpoint {
         });
       }
     });
+
     server.requestHandler(routeMatcher);
     server.listen(port, host, new Handler<AsyncResult<HttpServer>>() {
       @Override
       public void handle(AsyncResult<HttpServer> result) {
         if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
+          future.setException(result.cause());
         } else {
-          callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+          future.set(null);
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void stop(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> stop() {
     if (server != null) {
-      server.close(new Handler<AsyncResult<Void>>() {
-        @Override
-        public void handle(AsyncResult<Void> result) {
-          if (result.failed()) {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
-          } else {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
-          }
-        }
-      });
+      final SettableFuture<Void> future = SettableFuture.create();
+      server.close(VertxFutures.futureToHandler(future));
+      return future;
     } else {
-      callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+      return Futures.immediateFuture(null);
     }
   }
 

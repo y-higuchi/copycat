@@ -39,8 +39,6 @@ import java.util.Map;
 
 import javax.net.ssl.SSLException;
 
-import net.kuujo.copycat.AsyncCallback;
-import net.kuujo.copycat.AsyncResult;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
 import net.kuujo.copycat.protocol.ProtocolClient;
@@ -51,6 +49,10 @@ import net.kuujo.copycat.protocol.Response;
 import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
 
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+
 /**
  * Netty TCP protocol client.
  *
@@ -59,78 +61,76 @@ import net.kuujo.copycat.protocol.SubmitCommandResponse;
 public class TcpProtocolClient implements ProtocolClient {
   private final TcpProtocol protocol;
   private Channel channel;
-  private final Map<Object, AsyncCallback<? extends Response>> responseHandlers = new HashMap<>();
+  private final Map<Object, SettableFuture<? extends Response>> responseFutures = new HashMap<>();
 
   public TcpProtocolClient(TcpProtocol protocol) {
     this.protocol = protocol;
   }
 
   @Override
-  public void appendEntries(final AppendEntriesRequest request, final AsyncCallback<AppendEntriesResponse> callback) {
+  public ListenableFuture<AppendEntriesResponse> appendEntries(final AppendEntriesRequest request) {
     if (channel != null) {
+      final SettableFuture<AppendEntriesResponse> future = SettableFuture.create();
       channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
         @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
-          if (future.isSuccess()) {
-            responseHandlers.put(request.id(), callback);
+        public void operationComplete(ChannelFuture channelFuture) throws Exception {
+          if (channelFuture.isSuccess()) {
+            responseFutures.put(request.id(), future);
           } else {
-            callback.call(new AsyncResult<AppendEntriesResponse>(new ProtocolException(future.cause())));
+            future.setException(new ProtocolException(channelFuture.cause()));
           }
         }
       });
+      return future;
     } else {
-      callback.call(new AsyncResult<AppendEntriesResponse>(new ProtocolException("Client not connected")));
+      return Futures.immediateFailedFuture(new ProtocolException("Client not connected"));
     }
   }
 
   @Override
-  public void requestVote(final RequestVoteRequest request, final AsyncCallback<RequestVoteResponse> callback) {
+  public ListenableFuture<RequestVoteResponse> requestVote(final RequestVoteRequest request) {
     if (channel != null) {
+      final SettableFuture<RequestVoteResponse> future = SettableFuture.create();
       channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
         @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
-          if (future.isSuccess()) {
-            responseHandlers.put(request.id(), callback);
+        public void operationComplete(ChannelFuture channelFuture) throws Exception {
+          if (channelFuture.isSuccess()) {
+            responseFutures.put(request.id(), future);
           } else {
-            callback.call(new AsyncResult<RequestVoteResponse>(new ProtocolException(future.cause())));
+            future.setException(new ProtocolException(channelFuture.cause()));
           }
         }
       });
+      return future;
     } else {
-      callback.call(new AsyncResult<RequestVoteResponse>(new ProtocolException("Client not connected")));
+      return Futures.immediateFailedFuture(new ProtocolException("Client not connected"));
     }
   }
 
   @Override
-  public void submitCommand(final SubmitCommandRequest request, final AsyncCallback<SubmitCommandResponse> callback) {
+  public ListenableFuture<SubmitCommandResponse> submitCommand(final SubmitCommandRequest request) {
     if (channel != null) {
+      final SettableFuture<SubmitCommandResponse> future = SettableFuture.create();
       channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
         @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
-          if (future.isSuccess()) {
-            responseHandlers.put(request.id(), callback);
+        public void operationComplete(ChannelFuture channelFuture) throws Exception {
+          if (channelFuture.isSuccess()) {
+            responseFutures.put(request.id(), future);
           } else {
-            callback.call(new AsyncResult<SubmitCommandResponse>(new ProtocolException(future.cause())));
+            future.setException(new ProtocolException(channelFuture.cause()));
           }
         }
       });
+      return future;
     } else {
-      callback.call(new AsyncResult<SubmitCommandResponse>(new ProtocolException("Client not connected")));
+      return Futures.immediateFailedFuture(new ProtocolException("Client not connected"));
     }
   }
 
   @Override
-  public void connect() {
-    connect(null);
-  }
-
-  @Override
-  public void connect(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> connect() {
     if (channel != null) {
-      if (callback != null) {
-        callback.call(new AsyncResult<Void>((Void) null));
-      }
-      return;
+      return Futures.immediateFuture(null);
     }
 
     final SslContext sslContext;
@@ -138,10 +138,7 @@ public class TcpProtocolClient implements ProtocolClient {
       try {
         sslContext = SslContext.newClientContext(InsecureTrustManagerFactory.INSTANCE);
       } catch (SSLException e) {
-        if (callback != null) {
-          callback.call(new AsyncResult<Void>(e));
-        }
-        return;
+        return Futures.immediateFailedFuture(e);
       }
     } else {
       sslContext = null;
@@ -183,44 +180,39 @@ public class TcpProtocolClient implements ProtocolClient {
     bootstrap.option(ChannelOption.SO_KEEPALIVE, protocol.isKeepAlive());
     bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, protocol.getConnectTimeout());
 
+    final SettableFuture<Void> future = SettableFuture.create();
     bootstrap.connect(protocol.getHost(), protocol.getPort()).addListener(new ChannelFutureListener() {
       @Override
-      public void operationComplete(ChannelFuture future) throws Exception {
-        if (future.isSuccess()) {
-          channel = future.channel();
-          if (callback != null) {
-            callback.call(new AsyncResult<Void>((Void) null));
-          }
-        } else if (future.cause() != null && callback != null) {
-          callback.call(new AsyncResult<Void>(future.cause()));
+      public void operationComplete(ChannelFuture channelFuture) throws Exception {
+        if (channelFuture.isSuccess()) {
+          channel = channelFuture.channel();
+          future.set(null);
+        } else if (channelFuture.cause() != null) {
+          future.setException(channelFuture.cause());
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void close() {
-    close(null);
-  }
-
-  @Override
-  public void close(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> close() {
     if (channel != null) {
+      final SettableFuture<Void> future = SettableFuture.create();
       channel.close().addListener(new ChannelFutureListener() {
         @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
+        public void operationComplete(ChannelFuture channelFuture) throws Exception {
           channel = null;
-          if (future.isSuccess()) {
-            if (callback != null) {
-              callback.call(new AsyncResult<Void>((Void) null));
-            }
-          } else if (future.cause() != null && callback != null) {
-            callback.call(new AsyncResult<Void>(future.cause()));
+          if (channelFuture.isSuccess()) {
+            future.set(null);
+          } else if (channelFuture.cause() != null) {
+            future.setException(channelFuture.cause());
           }
         }
       });
-    } else if (callback != null) {
-      callback.call(new AsyncResult<Void>((Void) null));
+      return future;
+    } else {
+      return Futures.immediateFuture(null);
     }
   }
 
@@ -238,9 +230,9 @@ public class TcpProtocolClient implements ProtocolClient {
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void channelRead(final ChannelHandlerContext context, Object message) {
       Response response = (Response) message;
-      AsyncCallback<? extends Response> responseHandler = client.responseHandlers.remove(response.id());
-      if (responseHandler != null) {
-        responseHandler.call(new AsyncResult(response));
+      SettableFuture responseFuture = client.responseFutures.remove(response.id());
+      if (responseFuture != null) {
+        responseFuture.set(response);
       }
     }
   }

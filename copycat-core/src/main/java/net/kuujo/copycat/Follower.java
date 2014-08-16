@@ -15,12 +15,16 @@
  */
 package net.kuujo.copycat;
 
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
 import net.kuujo.copycat.protocol.RequestVoteRequest;
 import net.kuujo.copycat.protocol.RequestVoteResponse;
+
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Follower state.<p>
@@ -35,7 +39,7 @@ import net.kuujo.copycat.protocol.RequestVoteResponse;
  */
 class Follower extends BaseState {
   private static final Logger logger = Logger.getLogger(Follower.class.getCanonicalName());
-  private long currentTimer;
+  private ScheduledFuture<Void> currentTimer;
   private boolean shutdown = true;
 
   @Override
@@ -52,7 +56,9 @@ class Follower extends BaseState {
   private synchronized void resetTimer() {
     if (!shutdown) {
       // If a timer is already set, cancel the timer.
-      context.cancelTimer(currentTimer);
+      if (currentTimer != null) {
+        currentTimer.cancel(true);
+      }
 
       // Reset the last voted for candidate.
       context.setLastVotedFor(null);
@@ -62,12 +68,12 @@ class Follower extends BaseState {
       // timeout.
       long delay = context.config().getElectionTimeout() - (context.config().getElectionTimeout() / 4)
           + (Math.round(Math.random() * (context.config().getElectionTimeout() / 2)));
-      currentTimer = context.startTimer(delay, new Callback<Long>() {
+      currentTimer = context.config().getTimerStrategy().startTimer(new Runnable() {
         @Override
-        public void call(Long id) {
+        public void run() {
           // If the node has not yet voted for anyone then transition to
           // candidate and start a new election.
-          currentTimer = 0;
+          currentTimer = null;
           if (context.getLastVotedFor() == null) {
             logger.info("Election timed out. Transitioning to candidate.");
             context.transition(Candidate.class);
@@ -76,25 +82,28 @@ class Follower extends BaseState {
             resetTimer();
           }
         }
-      });
+      }, delay, TimeUnit.MILLISECONDS);
     }
   }
 
   @Override
-  public void appendEntries(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> responseCallback) {
+  public ListenableFuture<AppendEntriesResponse> appendEntries(AppendEntriesRequest request) {
     resetTimer();
-    super.appendEntries(request, responseCallback);
+    return super.appendEntries(request);
   }
 
   @Override
-  public void requestVote(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> responseCallback) {
+  public ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request) {
     resetTimer();
-    super.requestVote(request, responseCallback);
+    return super.requestVote(request);
   }
 
   @Override
   public synchronized void destroy() {
-    context.cancelTimer(currentTimer);
+    if (currentTimer != null) {
+      currentTimer.cancel(true);
+      currentTimer = null;
+    }
     shutdown = true;
   }
 

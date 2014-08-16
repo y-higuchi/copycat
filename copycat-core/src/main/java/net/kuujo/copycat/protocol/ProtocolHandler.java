@@ -15,7 +15,7 @@
  */
 package net.kuujo.copycat.protocol;
 
-import net.kuujo.copycat.AsyncCallback;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * Request handler for requests between CopyCat replicas.
@@ -30,7 +30,7 @@ public interface ProtocolHandler {
    * @param request The sync request.
    * @param responseCallback A sync response callback.
    */
-  void appendEntries(AppendEntriesRequest request, AsyncCallback<AppendEntriesResponse> responseCallback);
+  ListenableFuture<AppendEntriesResponse> appendEntries(AppendEntriesRequest request);
 
   /**
    * Sends or handles a protocol poll request.
@@ -38,7 +38,7 @@ public interface ProtocolHandler {
    * @param request The poll request.
    * @param responseCallback A poll response callback.
    */
-  void requestVote(RequestVoteRequest request, AsyncCallback<RequestVoteResponse> responseCallback);
+  ListenableFuture<RequestVoteResponse> requestVote(RequestVoteRequest request);
 
   /**
    * Sends or handles a protocol submit request.
@@ -46,6 +46,6 @@ public interface ProtocolHandler {
    * @param request The submit request.
    * @param responseCallback A submit response callback.
    */
-  void submitCommand(SubmitCommandRequest request, AsyncCallback<SubmitCommandResponse> responseCallback);
+  ListenableFuture<SubmitCommandResponse> submitCommand(SubmitCommandRequest request);
 
 }

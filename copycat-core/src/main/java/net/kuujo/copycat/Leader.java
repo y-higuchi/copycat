@@ -29,6 +29,8 @@ import java.util.Observer;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -48,6 +50,12 @@ import net.kuujo.copycat.protocol.SubmitCommandRequest;
 import net.kuujo.copycat.protocol.SubmitCommandResponse;
 import net.kuujo.copycat.util.Quorum;
 
+import com.google.common.base.Function;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+
 /**
  * Leader state.<p>
  *
@@ -61,7 +69,7 @@ import net.kuujo.copycat.util.Quorum;
  */
 class Leader extends BaseState implements Observer {
   private static final Logger logger = Logger.getLogger(Leader.class.getCanonicalName());
-  private long currentTimer;
+  private ScheduledFuture<Void> currentTimer;
   private final List<RemoteReplica> replicas = new ArrayList<>();
   private final Map<String, RemoteReplica> replicaMap = new HashMap<>();
   private final TreeMap<Long, Runnable> tasks = new TreeMap<>();
@@ -237,30 +245,33 @@ class Leader extends BaseState implements Observer {
    * Resets the ping timer.
    */
   private void setPingTimer() {
-    currentTimer = context.startTimer(context.config().getHeartbeatInterval(), new Callback<Long>() {
+    currentTimer = context.config().getTimerStrategy().startTimer(new Runnable() {
       @Override
-      public void call(Long id) {
+      public void run() {
         for (RemoteReplica replica : replicas) {
           replica.update();
         }
         setPingTimer();
       }
-    });
+    }, context.config().getHeartbeatInterval(), TimeUnit.MILLISECONDS);
   }
 
   @Override
-  public void appendEntries(final AppendEntriesRequest request, final AsyncCallback<AppendEntriesResponse> responseCallback) {
+  public ListenableFuture<AppendEntriesResponse> appendEntries(final AppendEntriesRequest request) {
     if (request.term() > context.getCurrentTerm()) {
-      super.appendEntries(request, responseCallback);
+      return super.appendEntries(request);
     } else if (request.term() < context.getCurrentTerm()) {
-      responseCallback.call(new AsyncResult<AppendEntriesResponse>(new AppendEntriesResponse(request.id(), context.getCurrentTerm(), false)));
+      return Futures.immediateFuture(new AppendEntriesResponse(request.id(), context.getCurrentTerm(), false));
     } else {
       context.transition(Follower.class);
+      return super.appendEntries(request);
     }
   }
 
   @Override
-  public void submitCommand(final SubmitCommandRequest request, final AsyncCallback<SubmitCommandResponse> responseCallback) {
+  public ListenableFuture<SubmitCommandResponse> submitCommand(final SubmitCommandRequest request) {
+    final SettableFuture<SubmitCommandResponse> future = SettableFuture.create();
+
     // Determine the type of command this request is executing. The command
     // type is provided by a CommandProvider which provides CommandInfo for a
     // given command. If no CommandInfo is provided then all commands are assumed
@@ -277,19 +288,19 @@ class Leader extends BaseState implements Observer {
       // simply apply the command, otherwise we need to ping a quorum of the
       // cluster to ensure that data is up-to-date before responding.
       if (context.config().isRequireReadQuorum()) {
-        final Quorum quorum = new Quorum(context.cluster.config().getQuorumSize());
-        quorum.setCallback(new Callback<Boolean>() {
+        final Quorum quorum = new Quorum(context.cluster.config().getQuorumSize(), new Function<Boolean, Void>() {
           @Override
-          public void call(Boolean succeeded) {
+          public Void apply(Boolean succeeded) {
             if (succeeded) {
               try {
-                responseCallback.call(new AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args()))));
+                future.set(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args())));
               } catch (Exception e) {
-                responseCallback.call(new AsyncResult<SubmitCommandResponse>(e));
+                future.setException(e);
               }
             } else {
-              responseCallback.call(new AsyncResult<SubmitCommandResponse>(new CopyCatException("Failed to acquire read quorum")));
+              future.setException(new CopyCatException("Failed to acquire read quorum"));
             }
+            return null;
           }
         });
 
@@ -297,22 +308,22 @@ class Leader extends BaseState implements Observer {
         // replicas and ping each replica. This will ensure that remote replicas
         // are still up-to-date with the leader's log.
         for (RemoteReplica replica : replicas) {
-          replica.ping(new AsyncCallback<Void>() {
+          Futures.addCallback(replica.ping(), new FutureCallback<Void>() {
             @Override
-            public void call(AsyncResult<Void> result) {
-              if (result.succeeded()) {
-                quorum.succeed();
-              } else {
-                quorum.fail();
-              }
+            public void onFailure(Throwable arg0) {
+              quorum.fail();
+            }
+            @Override
+            public void onSuccess(Void event) {
+              quorum.succeed();
             }
           });
         }
       } else {
         try {
-          responseCallback.call(new AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args()))));
+          future.set(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args())));
         } catch (Exception e) {
-          responseCallback.call(new AsyncResult<SubmitCommandResponse>(e));
+          future.setException(e);
         }
       }
     } else {
@@ -333,9 +344,9 @@ class Leader extends BaseState implements Observer {
             // Once the entry has been replicated we can apply it to the state
             // machine and respond with the command result.
             try {
-              responseCallback.call(new AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args()))));
+              future.set(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args())));
             } catch (Exception e) {
-              responseCallback.call(new AsyncResult<SubmitCommandResponse>(e));
+              future.setException(e);
             } finally {
               context.setLastApplied(index);
               compactLog();
@@ -348,15 +359,16 @@ class Leader extends BaseState implements Observer {
         // all entries written to the log will not require a quorum and thus
         // we won't be applying any entries out of order.
         try {
-          responseCallback.call(new AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args()))));
+          future.set(new SubmitCommandResponse(request.id(), context.stateMachineExecutor.applyCommand(request.command(), request.args())));
         } catch (Exception e) {
-          responseCallback.call(new AsyncResult<SubmitCommandResponse>(e));
+          future.setException(e);
         } finally {
           context.setLastApplied(index);
           compactLog();
         }
       }
     }
+    return future;
   }
 
   /**
@@ -415,7 +427,9 @@ class Leader extends BaseState implements Observer {
 
   @Override
   public void destroy() {
-    context.cancelTimer(currentTimer);
+    if (currentTimer != null) {
+      currentTimer.cancel(true);
+    }
 
     // Stop observing the observable cluster configuration.
     context.cluster().deleteObserver(this);
@@ -430,7 +444,7 @@ class Leader extends BaseState implements Observer {
     private long nextIndex;
     private long matchIndex;
     private AtomicBoolean running = new AtomicBoolean();
-    private final List<AsyncCallback<Void>> responseCallbacks = new CopyOnWriteArrayList<>();
+    private final List<SettableFuture<Void>> responseFutures = new CopyOnWriteArrayList<>();
 
     public RemoteReplica(Member member) {
       this.member = member;
@@ -442,17 +456,17 @@ class Leader extends BaseState implements Observer {
      */
     private void open() {
       if (open == false && running.compareAndSet(false, true)) {
-        member.protocol().client().connect(new AsyncCallback<Void>() {
+        Futures.addCallback(member.protocol().client().connect(), new FutureCallback<Void>() {
           @Override
-          public void call(AsyncResult<Void> result) {
-            if (result.succeeded()) {
-              open = true;
-              running.set(false);
-              triggerCallbacks();
-            } else {
-              running.set(false);
-              triggerCallbacks(result.cause());
-            }
+          public void onFailure(Throwable t) {
+            running.set(false);
+            triggerFutures(t);
+          }
+          @Override
+          public void onSuccess(Void event) {
+            open = true;
+            running.set(false);
+            triggerFutures();
           }
         });
       }
@@ -524,78 +538,77 @@ class Leader extends BaseState implements Observer {
       }
 
       AppendEntriesRequest request = new AppendEntriesRequest(context.nextCorrelationId(), context.getCurrentTerm(), context.cluster.localMember().uri(), prevIndex, prevEntry != null ? prevEntry.term() : 0, entries, commitIndex);
-      member.protocol().client().appendEntries(request, new AsyncCallback<AppendEntriesResponse>() {
+      Futures.addCallback(member.protocol().client().appendEntries(request), new FutureCallback<AppendEntriesResponse>() {
         @Override
-        public void call(AsyncResult<AppendEntriesResponse> result) {
-          if (result.succeeded()) {
-            AppendEntriesResponse response = result.value();
-            if (response.status().equals(Response.Status.OK)) {
-              if (response.succeeded()) {
-                if (logger.isLoggable(Level.FINER)) {
-                  if (!entries.isEmpty()) {
-                    if (entries.size() > 1) {
-                      logger.finer(String.format("%s successfully replicated entries %d-%d to %s", context.cluster().getLocalMember(), prevIndex+1, prevIndex+entries.size(), member.uri()));
-                    } else {
-                      logger.finer(String.format("%s successfully replicated entry %d to %s", context.cluster().getLocalMember(), prevIndex+1, member.uri()));
-                    }
-                  } else {
-                    logger.finer(String.format("%s successfully committed entry %d to %s", context.cluster().getLocalMember(), commitIndex, member.uri()));
-                  }
-                }
-
-                // Update the next index to send and the last index known to be replicated.
+        public void onFailure(Throwable t) {
+          running.set(false);
+          logger.warning(t.getMessage());
+          triggerFutures(t);
+        }
+        @Override
+        public void onSuccess(AppendEntriesResponse response) {
+          if (response.status().equals(Response.Status.OK)) {
+            if (response.succeeded()) {
+              if (logger.isLoggable(Level.FINER)) {
                 if (!entries.isEmpty()) {
-                  nextIndex = Math.max(nextIndex + 1, prevIndex + entries.size() + 1);
-                  matchIndex = Math.max(matchIndex, prevIndex + entries.size());
+                  if (entries.size() > 1) {
+                    logger.finer(String.format("%s successfully replicated entries %d-%d to %s", context.cluster().getLocalMember(), prevIndex+1, prevIndex+entries.size(), member.uri()));
+                  } else {
+                    logger.finer(String.format("%s successfully replicated entry %d to %s", context.cluster().getLocalMember(), prevIndex+1, member.uri()));
+                  }
+                } else {
+                  logger.finer(String.format("%s successfully committed entry %d to %s", context.cluster().getLocalMember(), commitIndex, member.uri()));
+                }
+              }
+
+              // Update the next index to send and the last index known to be replicated.
+              if (!entries.isEmpty()) {
+                nextIndex = Math.max(nextIndex + 1, prevIndex + entries.size() + 1);
+                matchIndex = Math.max(matchIndex, prevIndex + entries.size());
+                checkCommits();
+                doSync();
+              } else {
+                running.set(false);
+              }
+            } else {
+              if (logger.isLoggable(Level.FINER)) {
+                if (!entries.isEmpty()) {
+                  if (entries.size() > 1) {
+                    logger.finer(String.format("%s failed to replicate entries %d-%d to %s", context.cluster().getLocalMember(), prevIndex+1, prevIndex+entries.size(), member.uri()));
+                  } else {
+                    logger.finer(String.format("%s failed to replicate entry %d to %s", context.cluster().getLocalMember(), prevIndex+1, member.uri()));
+                  }
+                } else {
+                  logger.finer(String.format("%s failed to commit entry %d to %s", context.cluster().getLocalMember(), commitIndex, member.uri()));
+                }
+              }
+
+              // If replication failed then decrement the next index and attemt to
+              // retry replication. If decrementing the next index would result in
+              // a next index of 0 then something must have gone wrong. Revert to
+              // a follower.
+              if (nextIndex-1 == 0) {
+                running.set(false);
+                context.transition(Follower.class);
+              } else {
+                // If we were attempting to replicate log entries and not just
+                // sending a commit index or if we didn't have any log entries
+                // to replicate then decrement the next index. The node we were
+                // attempting to sync is not up to date.
+                if (!entries.isEmpty() || prevIndex == commitIndex) {
+                  nextIndex--;
                   checkCommits();
                   doSync();
                 } else {
+                  checkCommits();
                   running.set(false);
-                }
-              } else {
-                if (logger.isLoggable(Level.FINER)) {
-                  if (!entries.isEmpty()) {
-                    if (entries.size() > 1) {
-                      logger.finer(String.format("%s failed to replicate entries %d-%d to %s", context.cluster().getLocalMember(), prevIndex+1, prevIndex+entries.size(), member.uri()));
-                    } else {
-                      logger.finer(String.format("%s failed to replicate entry %d to %s", context.cluster().getLocalMember(), prevIndex+1, member.uri()));
-                    }
-                  } else {
-                    logger.finer(String.format("%s failed to commit entry %d to %s", context.cluster().getLocalMember(), commitIndex, member.uri()));
-                  }
-                }
-  
-                // If replication failed then decrement the next index and attemt to
-                // retry replication. If decrementing the next index would result in
-                // a next index of 0 then something must have gone wrong. Revert to
-                // a follower.
-                if (nextIndex-1 == 0) {
-                  running.set(false);
-                  context.transition(Follower.class);
-                } else {
-                  // If we were attempting to replicate log entries and not just
-                  // sending a commit index or if we didn't have any log entries
-                  // to replicate then decrement the next index. The node we were
-                  // attempting to sync is not up to date.
-                  if (!entries.isEmpty() || prevIndex == commitIndex) {
-                    nextIndex--;
-                    checkCommits();
-                    doSync();
-                  } else {
-                    checkCommits();
-                    running.set(false);
-                  }
                 }
               }
-            } else {
-              running.set(false);
-              logger.warning(response.error().getMessage());
-              triggerCallbacks();
             }
           } else {
             running.set(false);
-            logger.warning(result.cause().getMessage());
-            triggerCallbacks(result.cause());
+            logger.warning(response.error().getMessage());
+            triggerFutures();
           }
         }
       });
@@ -604,13 +617,16 @@ class Leader extends BaseState implements Observer {
     /**
      * Pings the replica.
      */
-    private void ping(AsyncCallback<Void> callback) {
+    private ListenableFuture<Void> ping() {
       if (open) {
-        responseCallbacks.add(callback);
+        SettableFuture<Void> future = SettableFuture.create();
+        responseFutures.add(future);
         if (running.compareAndSet(false, true)) {
           doPing();
         }
+        return future;
       }
+      return Futures.immediateFailedFuture(new CopyCatException("Connection not open"));
     }
 
     /**
@@ -619,51 +635,50 @@ class Leader extends BaseState implements Observer {
     private void doPing() {
       // The "ping" request is simply an empty synchronization request.
       AppendEntriesRequest request = new AppendEntriesRequest(context.nextCorrelationId(), context.getCurrentTerm(), context.cluster.localMember().uri(), nextIndex-1, context.log.containsEntry(nextIndex-1) ? context.log.getEntry(nextIndex-1).term() : 0, new ArrayList<Entry>(), context.getCommitIndex());
-      member.protocol().client().appendEntries(request, new AsyncCallback<AppendEntriesResponse>() {
+      Futures.addCallback(member.protocol().client().appendEntries(request), new FutureCallback<AppendEntriesResponse>() {
         @Override
-        public void call(AsyncResult<AppendEntriesResponse> result) {
-          if (result.succeeded()) {
-            running.set(false);
-            AppendEntriesResponse response = result.value();
-            if (response.status().equals(Response.Status.OK)) {
-              if (response.term() > context.getCurrentTerm()) {
-                context.setCurrentTerm(response.term());
-                context.setCurrentLeader(null);
-                context.transition(Follower.class);
-                triggerCallbacks(new CopyCatException("Not the leader"));
-              } else {
-                triggerCallbacks();
-              }
+        public void onFailure(Throwable t) {
+          running.set(false);
+          triggerFutures(t);
+        }
+        @Override
+        public void onSuccess(AppendEntriesResponse response) {
+          running.set(false);
+          if (response.status().equals(Response.Status.OK)) {
+            if (response.term() > context.getCurrentTerm()) {
+              context.setCurrentTerm(response.term());
+              context.setCurrentLeader(null);
+              context.transition(Follower.class);
+              triggerFutures(new CopyCatException("Not the leader"));
             } else {
-              triggerCallbacks(new CopyCatException(response.error()));
+              triggerFutures();
             }
-            checkCommits();
           } else {
-            running.set(false);
-            triggerCallbacks(result.cause());
+            triggerFutures(new CopyCatException(response.error()));
           }
+          checkCommits();
         }
       });
     }
 
     /**
-     * Triggers response callbacks with a completion result.
+     * Triggers response futures with a completion result.
      */
-    private void triggerCallbacks() {
-      for (AsyncCallback<Void> callback : responseCallbacks) {
-        callback.call(new AsyncResult<Void>((Void) null));
+    private void triggerFutures() {
+      for (SettableFuture<Void> future : responseFutures) {
+        future.set(null);
       }
-      responseCallbacks.clear();
+      responseFutures.clear();
     }
 
     /**
-     * Triggers response callbacks with an error result.
+     * Triggers response futures with an error result.
      */
-    private void triggerCallbacks(Throwable t) {
-      for (AsyncCallback<Void> callback : responseCallbacks) {
-        callback.call(new AsyncResult<Void>(t));
+    private void triggerFutures(Throwable t) {
+      for (SettableFuture<Void> future : responseFutures) {
+        future.setException(t);
       }
-      responseCallbacks.clear();
+      responseFutures.clear();
     }
 
     /**

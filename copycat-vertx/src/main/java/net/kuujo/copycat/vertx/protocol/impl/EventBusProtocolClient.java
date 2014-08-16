@@ -15,7 +15,6 @@
  */
 package net.kuujo.copycat.vertx.protocol.impl;
 
-import net.kuujo.copycat.AsyncCallback;
 import net.kuujo.copycat.protocol.AppendEntriesRequest;
 import net.kuujo.copycat.protocol.AppendEntriesResponse;
 import net.kuujo.copycat.protocol.ProtocolClient;
@@ -31,6 +30,10 @@ import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.impl.DefaultVertx;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
+
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 
 /**
  * Vert.x event bus protocol client.
@@ -57,7 +60,8 @@ public class EventBusProtocolClient implements ProtocolClient {
   }
 
   @Override
-  public void appendEntries(final AppendEntriesRequest request, final AsyncCallback<AppendEntriesResponse> callback) {
+  public ListenableFuture<AppendEntriesResponse> appendEntries(final AppendEntriesRequest request) {
+    final SettableFuture<AppendEntriesResponse> future = SettableFuture.create();
     JsonObject message = new JsonObject()
         .putNumber("term", request.term())
         .putString("leader", request.leader())
@@ -68,21 +72,23 @@ public class EventBusProtocolClient implements ProtocolClient {
       @Override
       public void handle(AsyncResult<Message<JsonObject>> result) {
         if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<AppendEntriesResponse>(result.cause()));
+          future.setException(result.cause());
         } else {
           String status = result.result().body().getString("status");
           if (status.equals("ok")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<AppendEntriesResponse>(new AppendEntriesResponse(request.id(), result.result().body().getLong("term"), result.result().body().getBoolean("succeeded"))));
+            future.set(new AppendEntriesResponse(request.id(), result.result().body().getLong("term"), result.result().body().getBoolean("succeeded")));
           } else if (status.equals("error")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<AppendEntriesResponse>(new AppendEntriesResponse(request.id(), result.result().body().getString("message"))));
+            future.set(new AppendEntriesResponse(request.id(), result.result().body().getString("message")));
           }
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void requestVote(final RequestVoteRequest request, final AsyncCallback<RequestVoteResponse> callback) {
+  public ListenableFuture<RequestVoteResponse> requestVote(final RequestVoteRequest request) {
+    final SettableFuture<RequestVoteResponse> future = SettableFuture.create();
     JsonObject message = new JsonObject()
         .putNumber("term", request.term())
         .putString("candidate", request.candidate())
@@ -92,21 +98,23 @@ public class EventBusProtocolClient implements ProtocolClient {
       @Override
       public void handle(AsyncResult<Message<JsonObject>> result) {
         if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<RequestVoteResponse>(result.cause()));
+          future.setException(result.cause());
         } else {
           String status = result.result().body().getString("status");
           if (status.equals("ok")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<RequestVoteResponse>(new RequestVoteResponse(request.id(), result.result().body().getLong("term"), result.result().body().getBoolean("voteGranted"))));
+            future.set(new RequestVoteResponse(request.id(), result.result().body().getLong("term"), result.result().body().getBoolean("voteGranted")));
           } else if (status.equals("error")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<RequestVoteResponse>(new RequestVoteResponse(request.id(), result.result().body().getString("message"))));
+            future.set(new RequestVoteResponse(request.id(), result.result().body().getString("message")));
           }
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void submitCommand(final SubmitCommandRequest request, final AsyncCallback<SubmitCommandResponse> callback) {
+  public ListenableFuture<SubmitCommandResponse> submitCommand(final SubmitCommandRequest request) {
+    final SettableFuture<SubmitCommandResponse> future = SettableFuture.create();
     JsonObject message = new JsonObject()
         .putString("action", "requestVote")
         .putString("command", request.command())
@@ -115,48 +123,50 @@ public class EventBusProtocolClient implements ProtocolClient {
       @Override
       public void handle(AsyncResult<Message<JsonObject>> result) {
         if (result.failed()) {
-          callback.call(new net.kuujo.copycat.AsyncResult<SubmitCommandResponse>(result.cause()));
+          future.setException(result.cause());
         } else {
           String status = result.result().body().getString("status");
           if (status.equals("ok")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), result.result().body().getValue("result"))));
+            Object value = result.result().body().getValue("result");
+            if (value instanceof JsonObject) {
+              future.set(new SubmitCommandResponse(request.id(), ((JsonObject) value).toMap()));
+            } else if (value instanceof JsonArray) {
+              future.set(new SubmitCommandResponse(request.id(), ((JsonArray) value).toList()));
+            } else {
+              future.set(new SubmitCommandResponse(request.id(), value));
+            }
           } else if (status.equals("error")) {
-            callback.call(new net.kuujo.copycat.AsyncResult<SubmitCommandResponse>(new SubmitCommandResponse(request.id(), result.result().body().getString("message"))));
+            future.set(new SubmitCommandResponse(request.id(), result.result().body().getString("message")));
           }
         }
       }
     });
+    return future;
   }
 
   @Override
-  public void connect() {
-  }
-
-  @Override
-  public void connect(final AsyncCallback<Void> callback) {
+  public ListenableFuture<Void> connect() {
     if (vertx == null) {
+      final SettableFuture<Void> future = SettableFuture.create();
       vertx = new DefaultVertx(port >= 0 ? port : 0, host, new Handler<AsyncResult<Vertx>>() {
         @Override
         public void handle(AsyncResult<Vertx> result) {
           if (result.failed()) {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>(result.cause()));
+            future.setException(result.cause());
           } else {
-            callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+            future.set(null);
           }
         }
       });
+      return future;
     } else {
-      callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+      return Futures.immediateFuture(null);
     }
   }
 
   @Override
-  public void close() {
-  }
-
-  @Override
-  public void close(AsyncCallback<Void> callback) {
-    callback.call(new net.kuujo.copycat.AsyncResult<Void>((Void) null));
+  public ListenableFuture<Void> close() {
+    return Futures.immediateFuture(null);
   }
 
 }

@@ -19,7 +19,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,7 +87,7 @@ class StateMachineExecutor {
           }
           CommandHolder holder = commands.get(name);
           if (holder == null) {
-            holder = new CommandHolder(stateMachine, new GenericCommand(name, command.type()), new ArrayList<>());
+            holder = new CommandHolder(stateMachine, new GenericCommand(name, command.type()), Arrays.<Method>asList());
             commands.put(name, holder);
           }
           holder.methods.add(method);

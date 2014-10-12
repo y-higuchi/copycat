@@ -1,121 +1,76 @@
-/*
- * Copyright 2014 the original author or authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package net.kuujo.copycat;
 
+import java.util.List;
+import java.util.Vector;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import net.jodah.concurrentunit.ConcurrentTestCase;
-import net.jodah.concurrentunit.Waiter;
 import net.kuujo.copycat.cluster.Cluster;
 import net.kuujo.copycat.cluster.LocalClusterConfig;
 import net.kuujo.copycat.cluster.Member;
 import net.kuujo.copycat.log.InMemoryLog;
 import net.kuujo.copycat.protocol.AsyncLocalProtocol;
-import org.testng.annotations.Test;
+import net.kuujo.copycat.protocol.LocalProtocol;
+import net.kuujo.copycat.spi.protocol.AsyncProtocol;
+import net.kuujo.copycat.spi.protocol.Protocol;
+import net.kuujo.copycat.test.TestStateMachine;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
-/**
- * Copycat test.
- *
- * @author <a href="http://github.com/kuujo">Jordan Halterman</a>
- */
-@Test
 public abstract class AbstractCopycatTest extends ConcurrentTestCase {
-  /**
-   * Starts a cluster of contexts.
-   */
-  protected void startCluster(Set<AsyncCopycat> contexts) throws Throwable {
-    Waiter waiter = new Waiter();
-    for (AsyncCopycat context : contexts) {
-      context.start().whenComplete((result, error) -> {
-        waiter.assertNull(error);
-        waiter.resume();
-      });
-    }
+  protected List<CopycatState> stateChanges = new Vector<>();
 
-    waiter.await(10000, contexts.size());
+  protected List<Copycat> buildCluster(int clusterSize) {
+    Protocol protocol = new LocalProtocol();
+    return IntStream.range(0, clusterSize)
+        .<Copycat>mapToObj(
+            i -> {
+              LocalClusterConfig config = buildClusterConfig(clusterSize, i);
+              Copycat copycat =
+                  Copycat.builder()
+                      .withStateMachine(new TestStateMachine())
+                      .withLog(new InMemoryLog())
+                      .withCluster(new Cluster<Member>(config))
+                      .withProtocol(protocol)
+                      .withConfig(new CopycatConfig().withElectionTimeout(5000))
+                      .build();
+              recordStateChangesFor(copycat);
+              return copycat;
+            })
+        .collect(Collectors.toList());
   }
 
-  /**
-   * Starts a cluster of uniquely named CopyCat contexts.
-   */
-  protected Set<AsyncCopycat> startCluster(int numInstances) throws Throwable {
-    Set<AsyncCopycat> contexts = createCluster(numInstances);
-    startCluster(contexts);
-    return contexts;
+  protected List<AsyncCopycat> buildAsyncCluster(int clusterSize) {
+    AsyncProtocol protocol = new AsyncLocalProtocol();
+    return IntStream.range(0, clusterSize)
+        .<AsyncCopycat>mapToObj(
+            i -> {
+              LocalClusterConfig config = buildClusterConfig(clusterSize, i);
+              AsyncCopycat copycat =
+                  AsyncCopycat.builder()
+                      .withStateMachine(new TestStateMachine())
+                      .withLog(new InMemoryLog())
+                      .withCluster(new Cluster<Member>(config))
+                      .withProtocol(protocol)
+                      .build();
+              recordStateChangesFor(copycat);
+              return copycat;
+            })
+        .collect(Collectors.toList());
   }
 
-  /**
-   * Creates a cluster of uniquely named CopyCat contexts.
-   */
-  protected Set<AsyncCopycat> createCluster(int numInstances) {
-    AsyncLocalProtocol protocol = new AsyncLocalProtocol();
-    Set<AsyncCopycat> instances = new HashSet<>(numInstances);
-    for (int i = 1; i <= numInstances; i++) {
-      LocalClusterConfig config = new LocalClusterConfig();
-      config.setLocalMember(String.valueOf(i));
-      for (int j = 1; j <= numInstances; j++) {
-        if (j != i) {
-          config.addRemoteMember(String.valueOf(j));
-        }
-      }
-
-      instances
-          .add(AsyncCopycat
-              .builder()
-              .withStateMachine(new TestStateMachine())
-              .withLog(new InMemoryLog())
-              .withCluster(new Cluster<Member>(config)).withProtocol(protocol).build());
+  private LocalClusterConfig buildClusterConfig(int clusterSize, int localNode) {
+    LocalClusterConfig config = new LocalClusterConfig();
+    config.setLocalMember(String.valueOf(localNode));
+    for (int j = 0; j < clusterSize; j++) {
+      if (j != localNode)
+        config.addRemoteMember(String.valueOf(j));
     }
-    return instances;
+    return config;
   }
 
-  protected static class TestStateMachine implements StateMachine {
-    private final Map<String, Object> data = new HashMap<>();
-
-    @Override
-    public byte[] takeSnapshot() {
-      return new byte[0];
-    }
-
-    @Override
-    public void installSnapshot(byte[] snapshot) {
-
-    }
-
-    @Command
-    public void set(String key, Object value) {
-      data.put(key, value);
-    }
-
-    @Query
-    public Object get(String key) {
-      return data.get(key);
-    }
-
-    @Command
-    public void delete(String key) {
-      data.remove(key);
-    }
-
-    @Command
-    public void clear() {
-      data.clear();
-    }
+  private void recordStateChangesFor(AbstractCopycat copycat) {
+    copycat.on().stateChange().run(e -> {
+      stateChanges.add(e.state());
+    });
   }
 }

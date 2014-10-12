@@ -16,9 +16,10 @@ package net.kuujo.copycat.functional;
 
 import java.util.Set;
 
-import net.kuujo.copycat.AbstractCopycatTest;
 import net.kuujo.copycat.AsyncCopycat;
 
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 /**
@@ -27,8 +28,31 @@ import org.testng.annotations.Test;
  * @author <a href="http://github.com/kuujo">Jordan Halterman</a>
  */
 @Test
-public class SubmitTest extends AbstractCopycatTest {
-  public void testCopyCat() throws Throwable {
+public class SubmitTest extends FunctionalTest {
+  private Set<AsyncCopycat> copycats;
+
+  @BeforeMethod
+  protected void beforeMethod() throws Throwable {
+    copycats = startCluster(3);
+  }
+
+  @AfterMethod
+  protected void stopCluster() throws Throwable {
+    stopCluster(copycats);
+  }
+
+  public void shouldSubmitSingleCommand() throws Throwable {
+    expectResume();
+    final AsyncCopycat copycat = copycats.iterator().next();
+    copycat.submit("set", "foo", "bar").whenComplete((result, error) -> {
+      threadAssertNull(error);
+      //resume();
+    });
+
+    await(30000);
+  }
+  
+  public void shouldSubmitChainOfCommands() throws Throwable {
     Set<AsyncCopycat> copycats = startCluster(3);
     final AsyncCopycat copycat = copycats.iterator().next();
     copycat.on().leaderElect().run((event) -> {
@@ -43,6 +67,6 @@ public class SubmitTest extends AbstractCopycatTest {
       });
     });
 
-    await(100000);
+    await(10000);
   }
 }

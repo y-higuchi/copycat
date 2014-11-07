@@ -11,12 +11,12 @@
   <name>Copycat</name>
 
   <properties>
-    <kryo.version>2.24.0</kryo.version>
+    <kryo.version>3.0.0</kryo.version>
   </properties>
 
   <dependencies>
     <dependency>
-      <groupId>com.esotericsoftware.kryo</groupId>
+      <groupId>com.esotericsoftware</groupId>
       <artifactId>kryo</artifactId>
       <version>${kryo.version}</version>
     </dependency>

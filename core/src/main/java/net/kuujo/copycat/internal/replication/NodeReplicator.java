@@ -211,6 +211,7 @@ class NodeReplicator {
     node.client().sync(request).whenComplete((response, error) -> {
       if (error != null) {
         triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), error);
+        sendIndex = Math.max(nextIndex, log.firstIndex());
       } else {
         LOGGER.debug("{} - Received {} from {}", state.clusterManager().localNode(), response, node);
         if (response.status().equals(Response.Status.OK)) {
@@ -237,6 +238,7 @@ class NodeReplicator {
           }
         } else {
           triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), response.error());
+          sendIndex = Math.max(nextIndex, log.firstIndex());
         }
       }
     });

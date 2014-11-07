@@ -14,6 +14,10 @@
  */
 package net.kuujo.copycat.internal.state;
 
+import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import net.kuujo.copycat.CopycatException;
 import net.kuujo.copycat.CopycatState;
 import net.kuujo.copycat.event.MembershipChangeEvent;
@@ -25,12 +29,19 @@ import net.kuujo.copycat.internal.log.CopycatEntry;
 import net.kuujo.copycat.internal.log.OperationEntry;
 import net.kuujo.copycat.internal.log.SnapshotEntry;
 import net.kuujo.copycat.log.Entry;
-import net.kuujo.copycat.protocol.*;
-import org.slf4j.Logger;
+import net.kuujo.copycat.protocol.PingRequest;
+import net.kuujo.copycat.protocol.PingResponse;
+import net.kuujo.copycat.protocol.PollRequest;
+import net.kuujo.copycat.protocol.PollResponse;
+import net.kuujo.copycat.protocol.Request;
+import net.kuujo.copycat.protocol.RequestHandler;
+import net.kuujo.copycat.protocol.Response;
+import net.kuujo.copycat.protocol.SubmitRequest;
+import net.kuujo.copycat.protocol.SubmitResponse;
+import net.kuujo.copycat.protocol.SyncRequest;
+import net.kuujo.copycat.protocol.SyncResponse;
 
-import java.io.IOException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
 
 /**
  * Base replica state controller.
@@ -57,7 +68,7 @@ abstract class StateController implements RequestHandler {
    * Logs a request.
    */
   protected final <R extends Request> R logRequest(R request) {
-    logger().debug("{} - Received {}", context.clusterManager().localNode(), request);
+    logger().trace("{} - Received {}", context.clusterManager().localNode(), request);
     return request;
   }
 
@@ -65,7 +76,7 @@ abstract class StateController implements RequestHandler {
    * Logs a response.
    */
   protected final <R extends Response> R logResponse(R response) {
-    logger().debug("{} - Sent {}", context.clusterManager().localNode(), response);
+    logger().trace("{} - Sent {}", context.clusterManager().localNode(), response);
     return response;
   }
 
@@ -80,14 +91,19 @@ abstract class StateController implements RequestHandler {
   }
 
   @Override
-  public synchronized CompletableFuture<PingResponse> ping(final PingRequest request) {
-    CompletableFuture<PingResponse> future = CompletableFuture.completedFuture(logResponse(handlePing(logRequest(request))));
-    // If a transition is required then transition back to the follower state.
-    // If the node is already a follower then the transition will be ignored.
-    if (transition.get()) {
-      context.transition(FollowerController.class);
+  public CompletableFuture<PingResponse> ping(final PingRequest request) {
+    // lock context -> controller to avoid dead-lock
+    synchronized (context) {
+      synchronized (this) {
+        CompletableFuture<PingResponse> future = CompletableFuture.completedFuture(logResponse(handlePing(logRequest(request))));
+        // If a transition is required then transition back to the follower state.
+        // If the node is already a follower then the transition will be ignored.
+        if (transition.get()) {
+          context.transition(FollowerController.class);
+        }
+        return future;
+      }
     }
-    return future;
   }
 
   /**
@@ -106,8 +122,8 @@ abstract class StateController implements RequestHandler {
     // reply false and return our current term. The leader will receive
     // the updated term and step down.
     if (request.term() < context.currentTerm()) {
-      logger().warn("{} - Rejected {}: request term is less than the current term ({})", context.clusterManager()
-        .localNode(), request, context.currentTerm());
+      logger().warn("{} - Rejected {}: ping request term is less than the current term ({})",
+                    context.clusterManager().localNode(), request, context.currentTerm());
       return new PingResponse(request.id(), context.currentTerm(), false);
     } else if (request.logIndex() > 0 && request.logTerm() > 0) {
       return doCheckPingEntry(request);
@@ -144,14 +160,19 @@ abstract class StateController implements RequestHandler {
   }
 
   @Override
-  public synchronized CompletableFuture<SyncResponse> sync(final SyncRequest request) {
-    CompletableFuture<SyncResponse> future = CompletableFuture.completedFuture(logResponse(handleSync(logRequest(request))));
-    // If a transition is required then transition back to the follower state.
-    // If the node is already a follower then the transition will be ignored.
-    if (transition.get()) {
-      context.transition(FollowerController.class);
+  public CompletableFuture<SyncResponse> sync(final SyncRequest request) {
+    // lock context -> controller to avoid dead-lock
+    synchronized (context) {
+      synchronized (this) {
+        CompletableFuture<SyncResponse> future = CompletableFuture.completedFuture(logResponse(handleSync(logRequest(request))));
+        // If a transition is required then transition back to the follower state.
+        // If the node is already a follower then the transition will be ignored.
+        if (transition.get()) {
+          context.transition(FollowerController.class);
+        }
+        return future;
+      }
     }
-    return future;
   }
 
   /**
@@ -170,7 +191,10 @@ abstract class StateController implements RequestHandler {
     // reply false and return our current term. The leader will receive
     // the updated term and step down.
     if (request.term() < context.currentTerm()) {
-      logger().warn("{} - Rejected {}: request term is less than the current term ({})", context.clusterManager().localNode(), request, context.currentTerm());
+      logger().warn("{} - SyncRequest Rejected {}: request term ({}) is less than the current term ({})",
+                    context.clusterManager().localNode(), request.id(), request.term(), context.currentTerm());
+      logger().debug("{} - Rejected {}: sync request term is less than the current term ({})",
+                     context.clusterManager().localNode(), request, context.currentTerm());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else if (request.prevLogIndex() > 0 && request.prevLogTerm() > 0) {
       return doCheckPreviousEntry(request);
@@ -184,7 +208,8 @@ abstract class StateController implements RequestHandler {
    */
   private synchronized SyncResponse doCheckPreviousEntry(SyncRequest request) {
     if (request.prevLogIndex() > context.log().lastIndex()) {
-      logger().warn("{} - Rejected {}: previous index ({}) is greater than the local log's last index ({})", context.clusterManager().localNode(), request, request.prevLogIndex(), context.log().lastIndex());
+      logger().warn("{} - Rejected SyncRequest {}: previous index ({}) is greater than the local log's last index ({})", context.clusterManager().localNode(), request.id(), request.prevLogIndex(), context.log().lastIndex());
+      logger().debug("{} - Rejected {}: previous index ({}) is greater than the local log's last index ({})", context.clusterManager().localNode(), request, request.prevLogIndex(), context.log().lastIndex());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     }
 
@@ -196,10 +221,14 @@ abstract class StateController implements RequestHandler {
     // can be overwritten.
     CopycatEntry entry = context.log().getEntry(request.prevLogIndex());
     if (entry == null) {
-      logger().warn("{} - Rejected {}: request entry not found in local log", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected SyncRequest {}: request entry not found in local log", context.clusterManager().localNode(), request.id());
+      logger().debug("{} - Rejected {}: request entry not found in local log", context.clusterManager().localNode(), request);
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else if (entry.term() != request.prevLogTerm()) {
-      logger().warn("{} - Rejected {}: request entry term does not match local log", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected SyncRequest {}: request entry prev term ({}) does not match local log ({})",
+                    context.clusterManager().localNode(), request.id(), request.prevLogTerm(), entry.term());
+      logger().debug("{} - Rejected {}: request entry prev term ({}) does not match local log ({})",
+                    context.clusterManager().localNode(), request, request.prevLogTerm(), entry.term());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else {
       return doAppendEntries(request);
@@ -263,7 +292,8 @@ abstract class StateController implements RequestHandler {
       if (context.commitIndex() > context.lastApplied()) {
         // Starting after the last applied entry, iterate through new entries
         // and apply them to the state machine up to the commit index.
-        for (long i = context.lastApplied() + 1; i <= Math.min(context.commitIndex(), lastIndex); i++) {
+        long firstEntryToApply = Math.max(context.lastApplied() + 1, context.log().firstIndex());
+        for (long i = firstEntryToApply; i <= Math.min(context.commitIndex(), lastIndex); i++) {
           // Apply the entry to the state machine.
           applyEntry(i);
         }
@@ -286,7 +316,7 @@ abstract class StateController implements RequestHandler {
       logger().error(e.getMessage());
     }
 
-    applySnapshot(index, (SnapshotEntry) entry);
+    applySnapshot(index, entry);
     context.commitIndex(index);
     context.lastApplied(index);
   }
@@ -307,13 +337,14 @@ abstract class StateController implements RequestHandler {
    * @param entry The entry to apply.
    */
   protected void applyEntry(long index, Entry entry) {
-    // Validate that the entry being applied is the next entry in the log.
-    if (context.lastApplied() == index-1) {
+    // Validate that the entry being applied is the next entry in the log,
+    // or is snapshot entry
+    if (context.lastApplied() == index-1 || context.log().firstIndex() == index) {
       // Ensure that the entry exists.
       if (entry == null) {
-        throw new IllegalStateException("null entry cannot be applied to state machine");
+        throw new IllegalStateException("null entry at index " + index + " cannot be applied to state machine");
       }
-  
+
       // If the entry is a command entry, apply the command to the state machine.
       if (entry instanceof OperationEntry) {
         applyCommand(index, (OperationEntry) entry);
@@ -383,6 +414,7 @@ abstract class StateController implements RequestHandler {
 
       // If the log is compactable then compact it at the snapshot index.
       try {
+        logger().debug("{} - Compacting log", context.clusterManager().localNode());
         context.log().compact(index, entry);
       } catch (IOException e) {
         throw new CopycatException(e, "Failed to compact log.");
@@ -427,7 +459,11 @@ abstract class StateController implements RequestHandler {
         final SnapshotEntry snapshot = createSnapshot();
         if (snapshot != null) {
           try {
+            final double before = context.log().size() / (double) (1024 * 1024);
             context.log().compact(lastApplied, snapshot);
+            final double after = context.log().size() / (double) (1024 * 1024);
+            logger().info("{} - Compacted log: {} -> {} MB",
+                          context.clusterManager().localNode(), before, after);
           } catch (IOException e) {
             throw new CopycatException(e, "Failed to compact log.");
           }
@@ -453,21 +489,25 @@ abstract class StateController implements RequestHandler {
     // assign that term and leader to the current context and step down as leader.
     if (request.term() > context.currentTerm()) {
       context.currentTerm(request.term());
-      context.currentLeader(null);
+      // Note: currentLeader stays null if current leader remained on next term
+      // FIXME: delaying setting the to null, until we actually need to step down
+      //context.currentLeader(null);
       context.lastVotedFor(null);
+
     }
 
     // If the request term is not as great as the current context term then don't
     // vote for the candidate. We want to vote for candidates that are at least
     // as up to date as us.
     if (request.term() < context.currentTerm()) {
-      logger().debug("{} - Rejected {}: candidate's term is less than the current term", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected {}: candidate's term is less than the current term", context.clusterManager().localNode(), request);
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
     // If the requesting candidate is ourself then always vote for ourself. Votes
     // for self are done by calling the local node. Note that this obviously
     // doesn't make sense for a leader.
     else if (request.candidate().equals(context.clusterManager().localNode().member().id())) {
+      context.currentLeader(null);
       context.lastVotedFor(context.clusterManager().localNode().member().id());
       context.events().voteCast().handle(new VoteCastEvent(context.currentTerm(), context.clusterManager().localNode().member()));
       logger().debug("{} - Accepted {}: candidate is the local node", context.clusterManager().localNode(), request);
@@ -476,13 +516,14 @@ abstract class StateController implements RequestHandler {
     // If the requesting candidate is not a known member of the cluster (to this
     // node) then don't vote for it. Only vote for candidates that we know about.
     else if (context.clusterManager().node(request.candidate()) == null) {
-      logger().debug("{} - Rejected {}: candidate is not known do the local node", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected {}: candidate is not known to the local node", context.clusterManager().localNode(), request);
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
     // If we've already voted for someone else then don't vote again.
     else if (context.lastVotedFor() == null || context.lastVotedFor().equals(request.candidate())) {
       // If the log is empty then vote for the candidate.
       if (context.log().isEmpty()) {
+        context.currentLeader(null);
         context.lastVotedFor(request.candidate());
         context.events().voteCast().handle(new VoteCastEvent(context.currentTerm(), context.clusterManager().node(request.candidate()).member()));
         logger().debug("{} - Accepted {}: candidate's log is up-to-date", context.clusterManager().localNode(), request);
@@ -494,6 +535,7 @@ abstract class StateController implements RequestHandler {
           long lastIndex = context.log().lastIndex();
           CopycatEntry entry = context.log().getEntry(lastIndex);
           if (entry == null) {
+            context.currentLeader(null);
             context.lastVotedFor(request.candidate());
             context.events()
               .voteCast()
@@ -507,6 +549,7 @@ abstract class StateController implements RequestHandler {
           long lastTerm = entry.term();
           if (request.lastLogIndex() >= lastIndex) {
             if (request.lastLogTerm() >= lastTerm) {
+              context.currentLeader(null);
               context.lastVotedFor(request.candidate());
               context.events()
                 .voteCast()
@@ -516,11 +559,11 @@ abstract class StateController implements RequestHandler {
               logger().debug("{} - Accepted {}: candidate's log is up-to-date", context.clusterManager().localNode(), request);
               return new PollResponse(request.id(), context.currentTerm(), true);
             } else {
-              logger().debug("{} - Rejected {}: candidate's last log term ({}) is in conflict with local log ({})", context.clusterManager().localNode(), request, request.lastLogTerm(), lastTerm);
+              logger().warn("{} - Rejected {}: candidate's last log term ({}) is in conflict with local log ({})", context.clusterManager().localNode(), request, request.lastLogTerm(), lastTerm);
               return new PollResponse(request.id(), context.currentTerm(), false);
             }
           } else {
-            logger().debug("{} - Rejected {}: candidate's last log entry ({}) is at a lower index than the local log ({})", context.clusterManager().localNode(), request, request.lastLogIndex(), lastIndex);
+            logger().warn("{} - Rejected {}: candidate's last log entry ({}) is at a lower index than the local log ({})", context.clusterManager().localNode(), request, request.lastLogIndex(), lastIndex);
             return new PollResponse(request.id(), context.currentTerm(), false);
           }
         }
@@ -528,7 +571,7 @@ abstract class StateController implements RequestHandler {
     }
     // In this case, we've already voted for someone else.
     else {
-      logger().debug("{} - Rejected {}: already voted for {}", context.clusterManager().localNode(), request, context.lastVotedFor());
+      logger().warn("{} - Rejected {}: already voted for {}", context.clusterManager().localNode(), request, context.lastVotedFor());
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
   }

@@ -66,6 +66,7 @@ public class LeaderController extends StateController implements Observer {
 
     replicator = new ClusterReplicator(context);
 
+    LOGGER.debug("{} - Applying pending entries to state machine", context.clusterManager().localNode());
     // When the leader is first elected, it needs to commit any pending operations
     // in its log to the state machine and then commit a snapshot to its log.
     // This methodology differs slightly from the standard Raft algorithm. Instead
@@ -75,8 +76,14 @@ public class LeaderController extends StateController implements Observer {
     // was replicated by the leader. This greatly simplifies snapshot management as
     // snapshots are simply replicated as a normal part of each node's log.
     int count = 0;
-    for (long i = context.lastApplied() + 1; i <= context.log().lastIndex(); i++) {
-      applyEntry(i);
+    long firstEntryToApply = Math.max(context.lastApplied() + 1, context.log().firstIndex());
+    for (long i = firstEntryToApply; i <= context.log().lastIndex(); i++) {
+      try {
+          applyEntry(i);
+      } catch (Exception e) {
+          LOGGER.error("{} - Applying log {} failed with exception", context.clusterManager().localNode(), i, e);
+          throw e;
+      }
       count++;
     }
     LOGGER.debug("{} - Applied {} entries to state machine", context.clusterManager().localNode(), count);
@@ -100,7 +107,7 @@ public class LeaderController extends StateController implements Observer {
     // Set a timer that will be used to periodically synchronize with other nodes
     // in the cluster. This timer acts as a heartbeat to ensure this node remains
     // the leader.
-   replicator.pingAll();
+    replicator.pingAll();
 
     LOGGER.debug("{} - Setting ping timer", context.clusterManager().localNode());
     setPingTimer();
@@ -202,8 +209,14 @@ public class LeaderController extends StateController implements Observer {
    */
   private void setPingTimer() {
     currentTimer = context.config().getTimerStrategy().schedule(() -> {
-      replicator.pingAll();
-      setPingTimer();
+      try {
+        LOGGER.trace("Starting periodic ping all");
+        replicator.pingAll();
+      } catch (Exception e) {
+        LOGGER.debug("Exception thrown during ping", e);
+      } finally {
+        setPingTimer();
+      }
     }, context.config().getHeartbeatInterval(), TimeUnit.MILLISECONDS);
   }
 
@@ -214,6 +227,8 @@ public class LeaderController extends StateController implements Observer {
     } else if (request.term() < context.currentTerm()) {
       return CompletableFuture.completedFuture(logResponse(new PingResponse(logRequest(request).id(), context.currentTerm(), false)));
     } else {
+      LOGGER.info("{} - Received ping from {} [term={}] stepping down. [local term={}]",
+                  context.clusterManager().localNode(), request.leader(), request.term(), context.currentTerm());
       context.transition(FollowerController.class);
       return super.ping(request);
     }
@@ -292,6 +307,7 @@ public class LeaderController extends StateController implements Observer {
         replicator.commit(index).whenComplete((resultIndex, error) -> {
           if (error == null) {
             try {
+              LOGGER.debug("{} - Completed replicating logs up to index {} for write", context.clusterManager().localNode(), index);
               future.complete(logResponse(new SubmitResponse(request.id(), operation.apply(request.args()))));
             } catch (Exception e) {
               future.completeExceptionally(e);
@@ -300,6 +316,7 @@ public class LeaderController extends StateController implements Observer {
               compactLog();
             }
           } else {
+            LOGGER.debug("{} - Failed replicating logs up to index {} for write", context.clusterManager().localNode(), index);
             future.completeExceptionally(error);
           }
         });

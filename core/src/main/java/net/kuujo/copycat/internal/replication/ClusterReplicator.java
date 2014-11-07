@@ -48,6 +48,7 @@ public class ClusterReplicator implements Replicator, Observer {
    * Initializes the replicator.
    */
   private void init() {
+    recalculateQuorumSize();
     state.clusterManager().addObserver(this);
     clusterChanged(state.clusterManager());
   }
@@ -65,8 +66,9 @@ public class ClusterReplicator implements Replicator, Observer {
     if (writeQuorum < 1) {
       writeQuorum = state.config().getCommandQuorumStrategy().calculateQuorumSize(state.clusterManager().cluster());
     }
-    int quorumSize = (int) Math.floor((replicas.size() + 1) / 2) + 1;
-    quorumIndex = quorumSize > 1 ? quorumSize - 2 : 0; // Subtract two, one for the current node and one for list indices
+    final int clusterSize = replicas.size() + 1;
+    final int quorumSize = (int) Math.floor(clusterSize / 2) + 1;
+    quorumIndex = clusterSize - quorumSize;
   }
 
   @Override
@@ -171,7 +173,11 @@ public class ClusterReplicator implements Replicator, Observer {
   public CompletableFuture<Long> commit(long index) {
     CompletableFuture<Long> future = new CompletableFuture<>();
     commitFutures.put(index, future);
-    replicate(index);
+    replicate(index).whenComplete((resultIndex, error)->{
+        if (error == null) {
+            triggerCommitFutures(resultIndex);
+        }
+    });
     return future;
   }
 

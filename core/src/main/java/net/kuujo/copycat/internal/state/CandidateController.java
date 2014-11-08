@@ -129,7 +129,7 @@ public class CandidateController extends StateController {
             client.close();
             if (!complete.get()) {
               if (error2 != null) {
-                LOGGER.warn(context.clusterManager().localNode().toString(), error2);
+                LOGGER.warn("{} - Polling {} failed with Exception", context.clusterManager().localNode(), node.member(), error2);
                 quorum.fail();
               } else if (!result2.voteGranted()) {
                 LOGGER.info("{} - Received rejected vote from {}", context.clusterManager().localNode(), node.member());

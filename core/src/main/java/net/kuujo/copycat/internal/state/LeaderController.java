@@ -75,7 +75,8 @@ public class LeaderController extends StateController implements Observer {
     // was replicated by the leader. This greatly simplifies snapshot management as
     // snapshots are simply replicated as a normal part of each node's log.
     int count = 0;
-    for (long i = context.lastApplied() + 1; i <= context.log().lastIndex(); i++) {
+    long firstEntryToApply = Math.max(context.lastApplied() + 1, context.log().firstIndex());
+    for (long i = firstEntryToApply; i <= context.log().lastIndex(); i++) {
       applyEntry(i);
       count++;
     }

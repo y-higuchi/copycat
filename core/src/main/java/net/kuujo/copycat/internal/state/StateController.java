@@ -14,6 +14,10 @@
  */
 package net.kuujo.copycat.internal.state;
 
+import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import net.kuujo.copycat.CopycatException;
 import net.kuujo.copycat.CopycatState;
 import net.kuujo.copycat.event.MembershipChangeEvent;
@@ -25,12 +29,19 @@ import net.kuujo.copycat.internal.log.CopycatEntry;
 import net.kuujo.copycat.internal.log.OperationEntry;
 import net.kuujo.copycat.internal.log.SnapshotEntry;
 import net.kuujo.copycat.log.Entry;
-import net.kuujo.copycat.protocol.*;
-import org.slf4j.Logger;
+import net.kuujo.copycat.protocol.PingRequest;
+import net.kuujo.copycat.protocol.PingResponse;
+import net.kuujo.copycat.protocol.PollRequest;
+import net.kuujo.copycat.protocol.PollResponse;
+import net.kuujo.copycat.protocol.Request;
+import net.kuujo.copycat.protocol.RequestHandler;
+import net.kuujo.copycat.protocol.Response;
+import net.kuujo.copycat.protocol.SubmitRequest;
+import net.kuujo.copycat.protocol.SubmitResponse;
+import net.kuujo.copycat.protocol.SyncRequest;
+import net.kuujo.copycat.protocol.SyncResponse;
 
-import java.io.IOException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
 
 /**
  * Base replica state controller.
@@ -263,7 +274,8 @@ abstract class StateController implements RequestHandler {
       if (context.commitIndex() > context.lastApplied()) {
         // Starting after the last applied entry, iterate through new entries
         // and apply them to the state machine up to the commit index.
-        for (long i = context.lastApplied() + 1; i <= Math.min(context.commitIndex(), lastIndex); i++) {
+        long firstEntryToApply = Math.max(context.lastApplied() + 1, context.log().firstIndex());
+        for (long i = firstEntryToApply; i <= Math.min(context.commitIndex(), lastIndex); i++) {
           // Apply the entry to the state machine.
           applyEntry(i);
         }
@@ -286,7 +298,7 @@ abstract class StateController implements RequestHandler {
       logger().error(e.getMessage());
     }
 
-    applySnapshot(index, (SnapshotEntry) entry);
+    applySnapshot(index, entry);
     context.commitIndex(index);
     context.lastApplied(index);
   }
@@ -308,12 +320,12 @@ abstract class StateController implements RequestHandler {
    */
   protected void applyEntry(long index, Entry entry) {
     // Validate that the entry being applied is the next entry in the log.
-    if (context.lastApplied() == index-1) {
+    if (context.lastApplied() == index-1 || context.log().firstIndex() == index) {
       // Ensure that the entry exists.
       if (entry == null) {
-        throw new IllegalStateException("null entry cannot be applied to state machine");
+        throw new IllegalStateException("null entry at index " + index + " cannot be applied to state machine");
       }
-  
+
       // If the entry is a command entry, apply the command to the state machine.
       if (entry instanceof OperationEntry) {
         applyCommand(index, (OperationEntry) entry);

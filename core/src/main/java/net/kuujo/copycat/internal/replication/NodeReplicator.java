@@ -15,6 +15,15 @@
  */
 package net.kuujo.copycat.internal.replication;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+
 import net.kuujo.copycat.CopycatException;
 import net.kuujo.copycat.internal.cluster.RemoteNode;
 import net.kuujo.copycat.internal.log.CopycatEntry;
@@ -26,12 +35,9 @@ import net.kuujo.copycat.protocol.PingRequest;
 import net.kuujo.copycat.protocol.ProtocolException;
 import net.kuujo.copycat.protocol.Response;
 import net.kuujo.copycat.protocol.SyncRequest;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Node replicator.
@@ -44,8 +50,10 @@ class NodeReplicator {
   private final RemoteNode<?> node;
   private final StateContext state;
   private final Log log;
+  // Index of the next log entry to send to the server
   private volatile long nextIndex;
-  private volatile long matchIndex;
+  // Index of highest log entry known to be replicated on server; Initialized to 0
+  private volatile long matchIndex = 0;
   private volatile long sendIndex;
   private volatile boolean open;
   private final TreeMap<Long, CompletableFuture<Long>> pingFutures = new TreeMap<>();
@@ -156,13 +164,14 @@ class NodeReplicator {
       return future;
     }
 
-    future = new CompletableFuture<>();
-    replicateFutures.put(index, future);
-
     if (index >= sendIndex) {
+      future = new CompletableFuture<>();
+      CompletableFuture<Long> existingFuture = replicateFutures.putIfAbsent(index, future);
       replicate();
+      return existingFuture != null ? existingFuture : future;
     }
-    return future;
+
+    return CompletableFuture.completedFuture(index);
   }
 
   /**
@@ -205,20 +214,17 @@ class NodeReplicator {
 
     SyncRequest request = new SyncRequest(state.nextCorrelationId(), state.currentTerm(), state.clusterManager().localNode().member().id(), prevIndex, prevEntry != null ? prevEntry.term() : 0, entries, commitIndex);
 
-    sendIndex = Math.max(sendIndex + 1, prevIndex + entries.size() + 1);
-
     LOGGER.debug("{} - Sent {} to {}", state.clusterManager().localNode(), request, node);
     node.client().sync(request).whenComplete((response, error) -> {
       if (error != null) {
         triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), error);
-        sendIndex = Math.max(nextIndex, log.firstIndex());
       } else {
         LOGGER.debug("{} - Received {} from {}", state.clusterManager().localNode(), response, node);
         if (response.status().equals(Response.Status.OK)) {
           if (response.succeeded()) {
             // Update the next index to send and the last index known to be replicated.
             if (!entries.isEmpty()) {
-              nextIndex = Math.max(nextIndex + 1, prevIndex + entries.size() + 1);
+              nextIndex = sendIndex = Math.max(nextIndex + 1, prevIndex + entries.size() + 1);
               matchIndex = Math.max(matchIndex, prevIndex + entries.size());
               triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size());
               replicate();
@@ -238,7 +244,6 @@ class NodeReplicator {
           }
         } else {
           triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), response.error());
-          sendIndex = Math.max(nextIndex, log.firstIndex());
         }
       }
     });

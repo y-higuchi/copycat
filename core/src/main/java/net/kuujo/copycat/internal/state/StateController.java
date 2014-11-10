@@ -117,8 +117,8 @@ abstract class StateController implements RequestHandler {
     // reply false and return our current term. The leader will receive
     // the updated term and step down.
     if (request.term() < context.currentTerm()) {
-      logger().warn("{} - Rejected {}: request term is less than the current term ({})", context.clusterManager()
-        .localNode(), request, context.currentTerm());
+      logger().warn("{} - Rejected {}: ping request term is less than the current term ({})",
+                    context.clusterManager().localNode(), request, context.currentTerm());
       return new PingResponse(request.id(), context.currentTerm(), false);
     } else if (request.logIndex() > 0 && request.logTerm() > 0) {
       return doCheckPingEntry(request);
@@ -181,7 +181,8 @@ abstract class StateController implements RequestHandler {
     // reply false and return our current term. The leader will receive
     // the updated term and step down.
     if (request.term() < context.currentTerm()) {
-      logger().warn("{} - Rejected {}: request term is less than the current term ({})", context.clusterManager().localNode(), request, context.currentTerm());
+      logger().warn("{} - Rejected {}: sync request term is less than the current term ({})",
+                    context.clusterManager().localNode(), request, context.currentTerm());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else if (request.prevLogIndex() > 0 && request.prevLogTerm() > 0) {
       return doCheckPreviousEntry(request);
@@ -488,7 +489,7 @@ abstract class StateController implements RequestHandler {
     // If the requesting candidate is not a known member of the cluster (to this
     // node) then don't vote for it. Only vote for candidates that we know about.
     else if (context.clusterManager().node(request.candidate()) == null) {
-      logger().debug("{} - Rejected {}: candidate is not known do the local node", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected {}: candidate is not known to the local node", context.clusterManager().localNode(), request);
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
     // If we've already voted for someone else then don't vote again.

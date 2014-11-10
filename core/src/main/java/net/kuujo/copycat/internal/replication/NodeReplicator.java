@@ -170,8 +170,12 @@ class NodeReplicator {
     if (index >= sendIndex) {
       future = new CompletableFuture<>();
       CompletableFuture<Long> existingFuture = replicateFutures.putIfAbsent(index, future);
-      replicate();
-      return existingFuture != null ? existingFuture : future;
+      if (existingFuture != null) {
+        return existingFuture;
+      } else {
+        replicate();
+        return future;
+      }
     }
 
     return CompletableFuture.completedFuture(index);

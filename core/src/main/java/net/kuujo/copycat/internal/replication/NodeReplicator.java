@@ -114,7 +114,9 @@ class NodeReplicator {
 
     CompletableFuture<Long> future = new CompletableFuture<>();
     if (!pingFutures.isEmpty() && pingFutures.lastKey() >= index) {
-      return pingFutures.lastEntry().getValue();
+      final Map.Entry<Long, CompletableFuture<Long>> pendingEntry = pingFutures.lastEntry();
+      LOGGER.trace("Pending ping future for {} exist, suppressing {}", pendingEntry.getKey(), index);
+      return pendingEntry.getValue();
     }
 
     pingFutures.put(index, future);
@@ -161,6 +163,7 @@ class NodeReplicator {
 
     CompletableFuture<Long> future = replicateFutures.get(index);
     if (future != null) {
+      LOGGER.trace("Pending replicate Future exist for {}", index);
       return future;
     }
 

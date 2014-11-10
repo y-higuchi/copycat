@@ -66,6 +66,7 @@ public class LeaderController extends StateController implements Observer {
 
     replicator = new ClusterReplicator(context);
 
+    LOGGER.debug("{} - Applying pending entries to state machine", context.clusterManager().localNode());
     // When the leader is first elected, it needs to commit any pending operations
     // in its log to the state machine and then commit a snapshot to its log.
     // This methodology differs slightly from the standard Raft algorithm. Instead
@@ -77,7 +78,12 @@ public class LeaderController extends StateController implements Observer {
     int count = 0;
     long firstEntryToApply = Math.max(context.lastApplied() + 1, context.log().firstIndex());
     for (long i = firstEntryToApply; i <= context.log().lastIndex(); i++) {
-      applyEntry(i);
+      try {
+          applyEntry(i);
+      } catch (Exception e) {
+          LOGGER.error("{} - Applying log {} failed with exception", context.clusterManager().localNode(), i, e);
+          throw e;
+      }
       count++;
     }
     LOGGER.debug("{} - Applied {} entries to state machine", context.clusterManager().localNode(), count);
@@ -203,6 +209,7 @@ public class LeaderController extends StateController implements Observer {
    */
   private void setPingTimer() {
     currentTimer = context.config().getTimerStrategy().schedule(() -> {
+      LOGGER.trace("Starting periodic ping all");
       replicator.pingAll();
       setPingTimer();
     }, context.config().getHeartbeatInterval(), TimeUnit.MILLISECONDS);

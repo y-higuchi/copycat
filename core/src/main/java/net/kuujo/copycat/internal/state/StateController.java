@@ -91,14 +91,19 @@ abstract class StateController implements RequestHandler {
   }
 
   @Override
-  public synchronized CompletableFuture<PingResponse> ping(final PingRequest request) {
-    CompletableFuture<PingResponse> future = CompletableFuture.completedFuture(logResponse(handlePing(logRequest(request))));
-    // If a transition is required then transition back to the follower state.
-    // If the node is already a follower then the transition will be ignored.
-    if (transition.get()) {
-      context.transition(FollowerController.class);
+  public CompletableFuture<PingResponse> ping(final PingRequest request) {
+    // lock context -> controller to avoid dead-lock
+    synchronized (context) {
+      synchronized (this) {
+        CompletableFuture<PingResponse> future = CompletableFuture.completedFuture(logResponse(handlePing(logRequest(request))));
+        // If a transition is required then transition back to the follower state.
+        // If the node is already a follower then the transition will be ignored.
+        if (transition.get()) {
+          context.transition(FollowerController.class);
+        }
+        return future;
+      }
     }
-    return future;
   }
 
   /**
@@ -155,14 +160,19 @@ abstract class StateController implements RequestHandler {
   }
 
   @Override
-  public synchronized CompletableFuture<SyncResponse> sync(final SyncRequest request) {
-    CompletableFuture<SyncResponse> future = CompletableFuture.completedFuture(logResponse(handleSync(logRequest(request))));
-    // If a transition is required then transition back to the follower state.
-    // If the node is already a follower then the transition will be ignored.
-    if (transition.get()) {
-      context.transition(FollowerController.class);
+  public CompletableFuture<SyncResponse> sync(final SyncRequest request) {
+    // lock context -> controller to avoid dead-lock
+    synchronized (context) {
+      synchronized (this) {
+        CompletableFuture<SyncResponse> future = CompletableFuture.completedFuture(logResponse(handleSync(logRequest(request))));
+        // If a transition is required then transition back to the follower state.
+        // If the node is already a follower then the transition will be ignored.
+        if (transition.get()) {
+          context.transition(FollowerController.class);
+        }
+        return future;
+      }
     }
-    return future;
   }
 
   /**

@@ -209,9 +209,14 @@ public class LeaderController extends StateController implements Observer {
    */
   private void setPingTimer() {
     currentTimer = context.config().getTimerStrategy().schedule(() -> {
-      LOGGER.trace("Starting periodic ping all");
-      replicator.pingAll();
-      setPingTimer();
+      try {
+        LOGGER.trace("Starting periodic ping all");
+        replicator.pingAll();
+      } catch (Exception e) {
+        LOGGER.debug("Exception thrown during ping", e);
+      } finally {
+        setPingTimer();
+      }
     }, context.config().getHeartbeatInterval(), TimeUnit.MILLISECONDS);
   }
 

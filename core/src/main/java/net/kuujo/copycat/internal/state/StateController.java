@@ -406,6 +406,7 @@ abstract class StateController implements RequestHandler {
 
       // If the log is compactable then compact it at the snapshot index.
       try {
+        logger().debug("{} - Compacting log", context.clusterManager().localNode());
         context.log().compact(index, entry);
       } catch (IOException e) {
         throw new CopycatException(e, "Failed to compact log.");

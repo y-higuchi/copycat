@@ -477,6 +477,7 @@ abstract class StateController implements RequestHandler {
     // assign that term and leader to the current context and step down as leader.
     if (request.term() > context.currentTerm()) {
       context.currentTerm(request.term());
+      // Note: currentLeader stays null if current leader remained on next term
       context.currentLeader(null);
       context.lastVotedFor(null);
     }

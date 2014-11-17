@@ -107,7 +107,7 @@ public class LeaderController extends StateController implements Observer {
     // Set a timer that will be used to periodically synchronize with other nodes
     // in the cluster. This timer acts as a heartbeat to ensure this node remains
     // the leader.
-   replicator.pingAll();
+    replicator.pingAll();
 
     LOGGER.debug("{} - Setting ping timer", context.clusterManager().localNode());
     setPingTimer();
@@ -211,7 +211,12 @@ public class LeaderController extends StateController implements Observer {
     currentTimer = context.config().getTimerStrategy().schedule(() -> {
       try {
         LOGGER.trace("Starting periodic ping all");
-        replicator.pingAll();
+        replicator.pingAll().whenComplete((index, error) -> {
+            if (error == null) {
+                // Set the current leader as this replica.
+                context.currentLeader(context.clusterManager().localNode().member().id());
+            }
+        });
       } catch (Exception e) {
         LOGGER.debug("Exception thrown during ping", e);
       } finally {

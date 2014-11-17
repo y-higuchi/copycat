@@ -167,18 +167,16 @@ class NodeReplicator {
       return future;
     }
 
-    if (index >= sendIndex) {
-      future = new CompletableFuture<>();
-      CompletableFuture<Long> existingFuture = replicateFutures.putIfAbsent(index, future);
-      if (existingFuture != null) {
-        return existingFuture;
-      } else {
-        replicate();
-        return future;
-      }
+    future = new CompletableFuture<>();
+    CompletableFuture<Long> existingFuture = replicateFutures.putIfAbsent(index, future);
+    if (existingFuture != null) {
+      return existingFuture;
     }
 
-    return CompletableFuture.completedFuture(index);
+    if (index >= sendIndex) {
+      replicate();
+    }
+    return future;
   }
 
   /**
@@ -188,13 +186,14 @@ class NodeReplicator {
     final long prevIndex = sendIndex - 1;
     final CopycatEntry prevEntry = log.getEntry(prevIndex);
 
-    // Create a list of up to ten entries to send to the follower.
+    // Create a list of up to BATCH_SIZE entries to send to the follower.
     // We can only send one snapshot entry in any given request. So, if any of
     // the entries are snapshot entries, send all entries up to the snapshot and
     // then send snapshot entries individually.
     List<CopycatEntry> entries = new ArrayList<>(BATCH_SIZE);
+    final long firstIndex = Math.max(sendIndex, log.firstIndex());
     long lastIndex = Math.min(sendIndex + BATCH_SIZE - 1, log.lastIndex());
-    for (long i = sendIndex; i <= lastIndex; i++) {
+    for (long i = firstIndex; i <= lastIndex; i++) {
       CopycatEntry entry = log.getEntry(i);
       if (entry instanceof SnapshotEntry) {
         if (entries.isEmpty()) {
@@ -221,17 +220,24 @@ class NodeReplicator {
 
     SyncRequest request = new SyncRequest(state.nextCorrelationId(), state.currentTerm(), state.clusterManager().localNode().member().id(), prevIndex, prevEntry != null ? prevEntry.term() : 0, entries, commitIndex);
 
+    // advance sendIndex
+    sendIndex = Math.max(sendIndex, prevIndex + entries.size() + 1);
+
     LOGGER.debug("{} - Sent {} to {}", state.clusterManager().localNode(), request, node);
     node.client().sync(request).whenComplete((response, error) -> {
       if (error != null) {
+        LOGGER.warn("{} - {} to {} Failed", state.clusterManager().localNode(), request, node, error);
+        // prevIndex + 1 == (sendIndex before this call advanced it)
         triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), error);
+        // reset sendIndex
+        sendIndex = Math.max(nextIndex, Math.min(sendIndex, prevIndex + 1));
       } else {
         LOGGER.debug("{} - Received {} from {}", state.clusterManager().localNode(), response, node);
         if (response.status().equals(Response.Status.OK)) {
           if (response.succeeded()) {
             // Update the next index to send and the last index known to be replicated.
             if (!entries.isEmpty()) {
-              nextIndex = sendIndex = Math.max(nextIndex + 1, prevIndex + entries.size() + 1);
+              nextIndex = Math.max(nextIndex, prevIndex + entries.size() + 1);
               matchIndex = Math.max(matchIndex, prevIndex + entries.size());
               triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size());
               replicate();
@@ -250,7 +256,10 @@ class NodeReplicator {
             }
           }
         } else {
+          LOGGER.warn("{} - {} to {} failed", state.clusterManager().localNode(), request, node, error);
           triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), response.error());
+          // reset sendIndex
+          sendIndex = Math.max(nextIndex, Math.min(sendIndex, prevIndex + 1));
         }
       }
     });

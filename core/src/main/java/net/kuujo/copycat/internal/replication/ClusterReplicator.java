@@ -172,7 +172,11 @@ public class ClusterReplicator implements Replicator, Observer {
   public CompletableFuture<Long> commit(long index) {
     CompletableFuture<Long> future = new CompletableFuture<>();
     commitFutures.put(index, future);
-    replicate(index);
+    replicate(index).whenComplete((resultIndex, error)->{
+        if (error == null) {
+            triggerCommitFutures(resultIndex);
+        }
+    });
     return future;
   }
 

@@ -48,6 +48,7 @@ public class ClusterReplicator implements Replicator, Observer {
    * Initializes the replicator.
    */
   private void init() {
+    recalculateQuorumSize();
     state.clusterManager().addObserver(this);
     clusterChanged(state.clusterManager());
   }

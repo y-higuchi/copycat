@@ -310,6 +310,7 @@ public class LeaderController extends StateController implements Observer {
         replicator.commit(index).whenComplete((resultIndex, error) -> {
           if (error == null) {
             try {
+              LOGGER.debug("{} - Completed replicating logs up to index {} for write", context.clusterManager().localNode(), index);
               future.complete(logResponse(new SubmitResponse(request.id(), operation.apply(request.args()))));
             } catch (Exception e) {
               future.completeExceptionally(e);
@@ -318,6 +319,7 @@ public class LeaderController extends StateController implements Observer {
               compactLog();
             }
           } else {
+            LOGGER.debug("{} - Failed replicating logs up to index {} for write", context.clusterManager().localNode(), index);
             future.completeExceptionally(error);
           }
         });

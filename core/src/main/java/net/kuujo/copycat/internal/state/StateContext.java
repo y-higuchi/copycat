@@ -212,6 +212,7 @@ public final class StateContext {
       LOGGER.info("{} - Transitioning to {}", clusterManager.localNode(), currentState.state());
     } catch (InstantiationException | IllegalAccessException e) {
       // Log the exception.
+      LOGGER.error("{} - Failed transitioning to {}", clusterManager.localNode(), currentState.state(), e);
     }
     if (oldState != null) {
       oldState.destroy();
@@ -219,7 +220,7 @@ public final class StateContext {
     } else {
       currentState.init(this);
     }
-
+    LOGGER.info("{} - Transitioned to {}", clusterManager.localNode(), currentState.state());
     events.stateChange().handle(new StateChangeEvent(currentState.state()));
   }
 

@@ -192,7 +192,9 @@ abstract class StateController implements RequestHandler {
     // the updated term and step down.
     if (request.term() < context.currentTerm()) {
       logger().warn("{} - Rejected {}: sync request term is less than the current term ({})",
-                    context.clusterManager().localNode(), request, context.currentTerm());
+                    context.clusterManager().localNode(), request.id(), context.currentTerm());
+      logger().debug("{} - Rejected {}: sync request term is less than the current term ({})",
+                     context.clusterManager().localNode(), request, context.currentTerm());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else if (request.prevLogIndex() > 0 && request.prevLogTerm() > 0) {
       return doCheckPreviousEntry(request);
@@ -330,7 +332,8 @@ abstract class StateController implements RequestHandler {
    * @param entry The entry to apply.
    */
   protected void applyEntry(long index, Entry entry) {
-    // Validate that the entry being applied is the next entry in the log.
+    // Validate that the entry being applied is the next entry in the log,
+    // or is snapshot entry
     if (context.lastApplied() == index-1 || context.log().firstIndex() == index) {
       // Ensure that the entry exists.
       if (entry == null) {
@@ -486,7 +489,7 @@ abstract class StateController implements RequestHandler {
     // vote for the candidate. We want to vote for candidates that are at least
     // as up to date as us.
     if (request.term() < context.currentTerm()) {
-      logger().debug("{} - Rejected {}: candidate's term is less than the current term", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected {}: candidate's term is less than the current term", context.clusterManager().localNode(), request);
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
     // If the requesting candidate is ourself then always vote for ourself. Votes
@@ -541,11 +544,11 @@ abstract class StateController implements RequestHandler {
               logger().debug("{} - Accepted {}: candidate's log is up-to-date", context.clusterManager().localNode(), request);
               return new PollResponse(request.id(), context.currentTerm(), true);
             } else {
-              logger().debug("{} - Rejected {}: candidate's last log term ({}) is in conflict with local log ({})", context.clusterManager().localNode(), request, request.lastLogTerm(), lastTerm);
+              logger().warn("{} - Rejected {}: candidate's last log term ({}) is in conflict with local log ({})", context.clusterManager().localNode(), request, request.lastLogTerm(), lastTerm);
               return new PollResponse(request.id(), context.currentTerm(), false);
             }
           } else {
-            logger().debug("{} - Rejected {}: candidate's last log entry ({}) is at a lower index than the local log ({})", context.clusterManager().localNode(), request, request.lastLogIndex(), lastIndex);
+            logger().warn("{} - Rejected {}: candidate's last log entry ({}) is at a lower index than the local log ({})", context.clusterManager().localNode(), request, request.lastLogIndex(), lastIndex);
             return new PollResponse(request.id(), context.currentTerm(), false);
           }
         }
@@ -553,7 +556,7 @@ abstract class StateController implements RequestHandler {
     }
     // In this case, we've already voted for someone else.
     else {
-      logger().debug("{} - Rejected {}: already voted for {}", context.clusterManager().localNode(), request, context.lastVotedFor());
+      logger().warn("{} - Rejected {}: already voted for {}", context.clusterManager().localNode(), request, context.lastVotedFor());
       return new PollResponse(request.id(), context.currentTerm(), false);
     }
   }

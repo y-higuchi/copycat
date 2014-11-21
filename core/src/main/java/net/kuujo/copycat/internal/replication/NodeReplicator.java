@@ -226,7 +226,8 @@ class NodeReplicator {
     LOGGER.debug("{} - Sent {} to {}", state.clusterManager().localNode(), request, node);
     node.client().sync(request).whenComplete((response, error) -> {
       if (error != null) {
-        LOGGER.warn("{} - {} to {} Failed", state.clusterManager().localNode(), request, node, error);
+        LOGGER.warn("{} - Sync ID:{} to {} failed: {}", state.clusterManager().localNode(), request.id(), node, error.getMessage());
+        LOGGER.debug("{} - Failure details {} ", state.clusterManager().localNode(), request, error);
         // prevIndex + 1 == (sendIndex before this call advanced it)
         triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), error);
         // reset sendIndex
@@ -256,7 +257,8 @@ class NodeReplicator {
             }
           }
         } else {
-          LOGGER.warn("{} - {} to {} failed", state.clusterManager().localNode(), request, node, error);
+          LOGGER.warn("{} - Received sync ID:{} failure from {}: {}", state.clusterManager().localNode(), request.id(), node, error.getMessage());
+          LOGGER.debug("{} - Failure details {} ", state.clusterManager().localNode(), request, error);
           triggerReplicateFutures(prevIndex + 1, prevIndex + entries.size(), response.error());
           // reset sendIndex
           sendIndex = Math.max(nextIndex, Math.min(sendIndex, prevIndex + 1));

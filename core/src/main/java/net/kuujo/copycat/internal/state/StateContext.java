@@ -196,7 +196,7 @@ public final class StateContext {
 
   /**
    * Transitions to a new state.
-   * 
+   *
    * @throws NullPointerException if {@code type} is null
    */
   public synchronized void transition(Class<? extends StateController> type) {
@@ -220,7 +220,9 @@ public final class StateContext {
     } else {
       currentState.init(this);
     }
-    LOGGER.info("{} - Transitioned to {}", clusterManager.localNode(), currentState.state());
+    LOGGER.info("{} - Transitioned to {} [leader={}, term={}]",
+                clusterManager.localNode(), currentState.state(),
+                currentLeader, currentTerm);
     events.stateChange().handle(new StateChangeEvent(currentState.state()));
   }
 

@@ -223,7 +223,8 @@ abstract class StateController implements RequestHandler {
       logger().warn("{} - Rejected {}: request entry not found in local log", context.clusterManager().localNode(), request);
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else if (entry.term() != request.prevLogTerm()) {
-      logger().warn("{} - Rejected {}: request entry term does not match local log", context.clusterManager().localNode(), request);
+      logger().warn("{} - Rejected {}: request entry prev term ({}) does not match local log ({})",
+                    context.clusterManager().localNode(), request, request.prevLogTerm(), entry.term());
       return new SyncResponse(request.id(), context.currentTerm(), false, context.log().lastIndex());
     } else {
       return doAppendEntries(request);

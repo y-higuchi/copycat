@@ -214,15 +214,19 @@ public final class StateContext {
       // Log the exception.
       LOGGER.error("{} - Failed transitioning to {}", clusterManager.localNode(), currentState.state(), e);
     }
-    if (oldState != null) {
-      oldState.destroy();
-      currentState.init(this);
-    } else {
-      currentState.init(this);
+    try {
+      if (oldState != null) {
+        oldState.destroy();
+        currentState.init(this);
+      } else {
+        currentState.init(this);
+      }
+    } catch (Exception e) {
+      LOGGER.error("{} - Failed during init", clusterManager.localNode(), e);
+      throw e;
     }
-    LOGGER.info("{} - Transitioned to {} [leader={}, term={}]",
-                clusterManager.localNode(), currentState.state(),
-                currentLeader, currentTerm);
+    LOGGER.info("{} - Transitioned to {} [term={}]",
+                clusterManager.localNode(), currentState.state(), currentTerm);
     events.stateChange().handle(new StateChangeEvent(currentState.state()));
   }
 

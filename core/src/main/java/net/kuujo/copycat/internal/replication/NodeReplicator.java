@@ -252,7 +252,7 @@ class NodeReplicator {
               // the replica in the response to generate a new nextIndex. This allows
               // us to skip repeatedly replicating one entry at a time if it's not
               // necessary.
-              nextIndex = sendIndex = Math.max(response.lastLogIndex() + 1, log.firstIndex());
+              nextIndex = sendIndex = Math.max(response.lastLogIndex(), log.firstIndex());
               replicate();
             }
           }

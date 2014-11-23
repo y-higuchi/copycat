@@ -455,7 +455,11 @@ abstract class StateController implements RequestHandler {
         final SnapshotEntry snapshot = createSnapshot();
         if (snapshot != null) {
           try {
+            final double before = context.log().size() / (double) (1024^2);
             context.log().compact(lastApplied, snapshot);
+            final double after = context.log().size() / (double) (1024^2);
+            logger().info("{} - Compacted log: {} -> {} MB",
+                          context.clusterManager().localNode(), before, after);
           } catch (IOException e) {
             throw new CopycatException(e, "Failed to compact log.");
           }

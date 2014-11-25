@@ -211,12 +211,7 @@ public class LeaderController extends StateController implements Observer {
     currentTimer = context.config().getTimerStrategy().schedule(() -> {
       try {
         LOGGER.trace("Starting periodic ping all");
-        replicator.pingAll().whenComplete((index, error) -> {
-            if (error == null) {
-                // Set the current leader as this replica.
-                context.currentLeader(context.clusterManager().localNode().member().id());
-            }
-        });
+        replicator.pingAll();
       } catch (Exception e) {
         LOGGER.debug("Exception thrown during ping", e);
       } finally {

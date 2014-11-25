@@ -232,6 +232,8 @@ public class LeaderController extends StateController implements Observer {
     } else if (request.term() < context.currentTerm()) {
       return CompletableFuture.completedFuture(logResponse(new PingResponse(logRequest(request).id(), context.currentTerm(), false)));
     } else {
+      LOGGER.info("{} - Received ping from {} [term={}] stepping down. [local term={}]",
+                  context.clusterManager().localNode(), request.leader(), request.term(), context.currentTerm());
       context.transition(FollowerController.class);
       return super.ping(request);
     }

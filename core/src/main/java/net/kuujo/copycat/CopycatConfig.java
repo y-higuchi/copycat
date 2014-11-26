@@ -172,7 +172,7 @@ public class CopycatConfig {
   @SuppressWarnings("rawtypes")
   private QuorumStrategy queryQuorumStrategy = DEFAULT_QUORUM_STRATEGY;
   private boolean consistentQueryExecution = true;
-  private int maxLogSize = 32 * 1024^2;
+  private int maxLogSize = 32 * 1024 * 1024;
   private CorrelationStrategy<?> correlationStrategy = DEFAULT_CORRELATION_STRATEGY;
   private TimerStrategy timerStrategy = DEFAULT_TIMER_STRATEGY;
 

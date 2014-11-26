@@ -486,8 +486,10 @@ abstract class StateController implements RequestHandler {
     if (request.term() > context.currentTerm()) {
       context.currentTerm(request.term());
       // Note: currentLeader stays null if current leader remained on next term
-      context.currentLeader(null);
+      // FIXME: delaying setting the to null, until we actually need to step down
+      //context.currentLeader(null);
       context.lastVotedFor(null);
+
     }
 
     // If the request term is not as great as the current context term then don't
@@ -501,6 +503,7 @@ abstract class StateController implements RequestHandler {
     // for self are done by calling the local node. Note that this obviously
     // doesn't make sense for a leader.
     else if (request.candidate().equals(context.clusterManager().localNode().member().id())) {
+      context.currentLeader(null);
       context.lastVotedFor(context.clusterManager().localNode().member().id());
       context.events().voteCast().handle(new VoteCastEvent(context.currentTerm(), context.clusterManager().localNode().member()));
       logger().debug("{} - Accepted {}: candidate is the local node", context.clusterManager().localNode(), request);
@@ -516,6 +519,7 @@ abstract class StateController implements RequestHandler {
     else if (context.lastVotedFor() == null || context.lastVotedFor().equals(request.candidate())) {
       // If the log is empty then vote for the candidate.
       if (context.log().isEmpty()) {
+        context.currentLeader(null);
         context.lastVotedFor(request.candidate());
         context.events().voteCast().handle(new VoteCastEvent(context.currentTerm(), context.clusterManager().node(request.candidate()).member()));
         logger().debug("{} - Accepted {}: candidate's log is up-to-date", context.clusterManager().localNode(), request);
@@ -527,6 +531,7 @@ abstract class StateController implements RequestHandler {
           long lastIndex = context.log().lastIndex();
           CopycatEntry entry = context.log().getEntry(lastIndex);
           if (entry == null) {
+            context.currentLeader(null);
             context.lastVotedFor(request.candidate());
             context.events()
               .voteCast()
@@ -540,6 +545,7 @@ abstract class StateController implements RequestHandler {
           long lastTerm = entry.term();
           if (request.lastLogIndex() >= lastIndex) {
             if (request.lastLogTerm() >= lastTerm) {
+              context.currentLeader(null);
               context.lastVotedFor(request.candidate());
               context.events()
                 .voteCast()

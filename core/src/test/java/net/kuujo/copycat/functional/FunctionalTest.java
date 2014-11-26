@@ -13,42 +13,61 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.kuujo.copycat;
-
-import net.jodah.concurrentunit.ConcurrentTestCase;
-import net.jodah.concurrentunit.Waiter;
-import net.kuujo.copycat.cluster.Cluster;
-import net.kuujo.copycat.cluster.LocalClusterConfig;
-import net.kuujo.copycat.cluster.Member;
-import net.kuujo.copycat.log.InMemoryLog;
-import net.kuujo.copycat.protocol.LocalProtocol;
-import org.testng.annotations.Test;
+package net.kuujo.copycat.functional;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import net.jodah.concurrentunit.ConcurrentTestCase;
+import net.jodah.concurrentunit.Waiter;
+import net.kuujo.copycat.Command;
+import net.kuujo.copycat.Copycat;
+import net.kuujo.copycat.Query;
+import net.kuujo.copycat.StateMachine;
+import net.kuujo.copycat.cluster.Cluster;
+import net.kuujo.copycat.cluster.LocalClusterConfig;
+import net.kuujo.copycat.cluster.Member;
+import net.kuujo.copycat.log.InMemoryLog;
+import net.kuujo.copycat.protocol.LocalProtocol;
+
+import org.testng.annotations.Test;
+
 /**
- * Copycat test.
+ * Functional test support.
  *
  * @author <a href="http://github.com/kuujo">Jordan Halterman</a>
  */
 @Test
-public abstract class AbstractCopycatTest extends ConcurrentTestCase {
+public abstract class FunctionalTest extends ConcurrentTestCase {
   /**
    * Starts a cluster of contexts.
    */
-  protected void startCluster(Set<Copycat> contexts) throws Throwable {
+  protected void startCluster(Set<Copycat> copycats) throws Throwable {
     Waiter waiter = new Waiter();
-    for (Copycat context : contexts) {
-      context.start().whenComplete((result, error) -> {
+    waiter.expectResumes(copycats.size());
+    for (Copycat copycat : copycats) {
+      copycat.start().whenComplete((result, error) -> {
         waiter.assertNull(error);
         waiter.resume();
       });
     }
 
-    waiter.await(10000, contexts.size());
+    waiter.await(10000);
+  }
+
+  protected void stopCluster(Set<Copycat> copycats) throws Throwable {
+    Waiter waiter = new Waiter();
+    waiter.expectResumes(copycats.size());
+    for (Copycat copycat : copycats) {
+      copycat.stop().whenComplete((v, error) -> {
+        waiter.assertNull(error);
+        waiter.resume();
+      });
+    }
+
+    waiter.await(5000);
   }
 
   /**
@@ -75,12 +94,8 @@ public abstract class AbstractCopycatTest extends ConcurrentTestCase {
         }
       }
 
-      instances
-          .add(Copycat
-              .builder()
-              .withStateMachine(new TestStateMachine())
-              .withLog(new InMemoryLog())
-              .withCluster(new Cluster<Member>(config)).withProtocol(protocol).build());
+      instances.add(new Copycat(new TestStateMachine(), new InMemoryLog(), new Cluster<Member>(
+        config), protocol));
     }
     return instances;
   }

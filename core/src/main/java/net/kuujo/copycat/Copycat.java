@@ -37,6 +37,7 @@ import net.kuujo.copycat.spi.protocol.Protocol;
  * <p>
  *
  * <pre>
+ * {@code
  * // Create the state machine.
  * StateMachine stateMachine = new DataStore();
  *
@@ -63,6 +64,7 @@ import net.kuujo.copycat.spi.protocol.Protocol;
  *     });
  *   });
  * });
+ * }
  * </pre>
  *
  * In order to provide this guarantee, state machines must be designed accordingly. State machines
@@ -73,6 +75,7 @@ import net.kuujo.copycat.spi.protocol.Protocol;
  * To create a state machine, simple implement the {@link StateMachine} interface.
  *
  * <pre>
+ * {@code
  * public class DataStore implements StateMachine {
  *   private final Map<String, Object> data = new HashMap<>();
  *
@@ -85,6 +88,7 @@ import net.kuujo.copycat.spi.protocol.Protocol;
  *   public void get(String name) {
  *     return data.get(name);
  *   }
+ * }
  * }
  * </pre>
  * <p>

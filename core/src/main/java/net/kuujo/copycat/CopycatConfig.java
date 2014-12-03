@@ -206,9 +206,9 @@ public class CopycatConfig {
    * This is the timeout within which a vote must occur. When a replica becomes a candidate in an election,
    * the election timer will be started. If the election timer expires before the election round has completed
    * (i.e. enough votes were received) then a new election round will begin.
-   * 
+   *
    * @param timeout The election timeout in milliseconds.
-   * @throws IllegalArgumentException if {@code timeout} is not > 0
+   * @throws IllegalArgumentException if {@code timeout} is not {@literal > 0}
    */
   public void setElectionTimeout(long timeout) {
     this.electionTimeout = Assert.arg(timeout, timeout > 0, "Election timeout must be positive");
@@ -220,7 +220,7 @@ public class CopycatConfig {
    * This is the timeout within which a vote must occur. When a replica becomes a candidate in an election,
    * the election timer will be started. If the election timer expires before the election round has completed
    * (i.e. enough votes were received) then a new election round will begin.
-   * 
+   *
    * @return The election timeout.
    */
   public long getElectionTimeout() {
@@ -233,10 +233,10 @@ public class CopycatConfig {
    * This is the timeout within which a vote must occur. When a replica becomes a candidate in an election,
    * the election timer will be started. If the election timer expires before the election round has completed
    * (i.e. enough votes were received) then a new election round will begin.
-   * 
+   *
    * @param timeout The election timeout in milliseconds.
    * @return The copycat configuration.
-   * @throws IllegalArgumentException if {@code timeout} is not > 0
+   * @throws IllegalArgumentException if {@code timeout} is not {@literal > 0}
    */
   public CopycatConfig withElectionTimeout(long timeout) {
     this.electionTimeout = Assert.arg(timeout, timeout > 0, "Election timeout must be positive");
@@ -248,9 +248,9 @@ public class CopycatConfig {
    *
    * This is the interval at which the replica sends heartbeat messages to other nodes in the cluster. Note that
    * this property only applies to leaders as all heartbeats only flow from leader to followers.
-   * 
+   *
    * @param interval The interval at which the node should send heartbeat messages in milliseconds.
-   * @throws IllegalArgumentException if {@code interval} is not > 0
+   * @throws IllegalArgumentException if {@code interval} is not {@literal > 0}
    */
   public void setHeartbeatInterval(long interval) {
     this.heartbeatInterval = Assert.arg(interval, interval > 0, "Heart beat interval must be positive");
@@ -261,7 +261,7 @@ public class CopycatConfig {
    *
    * This is the interval at which the replica sends heartbeat messages to other nodes in the cluster. Note that
    * this property only applies to leaders as all heartbeats only flow from leader to followers.
-   * 
+   *
    * @return The replica heartbeat interval.
    */
   public long getHeartbeatInterval() {
@@ -273,10 +273,10 @@ public class CopycatConfig {
    *
    * This is the interval at which the replica sends heartbeat messages to other nodes in the cluster. Note that
    * this property only applies to leaders as all heartbeats only flow from leader to followers.
-   * 
+   *
    * @param interval The interval at which the node should send heartbeat messages in milliseconds.
    * @return The replica configuration.
-   * @throws IllegalArgumentException if {@code interval} is not > 0
+   * @throws IllegalArgumentException if {@code interval} is not {@literal > 0}
    */
   public CopycatConfig withHeartbeatInterval(long interval) {
     this.heartbeatInterval = Assert.arg(interval, interval > 0, "Heart beat interval must be positive");
@@ -292,7 +292,7 @@ public class CopycatConfig {
    * inconsistency of state</em> between replicas. While disabling quorums will allow a leader to remain
    * available even while a majority of the cluster is unavailable, once the cluster is healed data may
    * be overwritten. Thus it is strongly recommended that command quorums not be disabled.
-   * 
+   *
    * @param require Indicates whether a quorum replication should be required for commands.
    */
   public void setRequireCommandQuorum(boolean require) {
@@ -309,7 +309,7 @@ public class CopycatConfig {
    * inconsistency of state</em> between replicas. While disabling quorums will allow a leader to remain
    * available even while a majority of the cluster is unavailable, once the cluster is healed data may
    * be overwritten. Thus it is strongly recommended that command quorums not be disabled.
-   * 
+   *
    * @return Indicates whether a quorum replication is required for command operations.
    */
   public boolean isRequireCommandQuorum() {
@@ -326,7 +326,7 @@ public class CopycatConfig {
    * inconsistency of state</em> between replicas. While disabling quorums will allow a leader to remain
    * available even while a majority of the cluster is unavailable, once the cluster is healed data may
    * be overwritten. Thus it is strongly recommended that command quorums not be disabled.
-   * 
+   *
    * @param require Indicates whether a quorum replication should be required for commands.
    * @return The Copycat configuration.
    */
@@ -343,7 +343,7 @@ public class CopycatConfig {
    * can set a fixed quorum size for commands.
    *
    * @param quorumSize The required command quorum size.
-   * @throws IllegalArgumentException if {@code quorumSize} is not >= -1
+   * @throws IllegalArgumentException if {@code quorumSize} is not {@literal >= -1}
    */
   public void setCommandQuorumSize(int quorumSize) {
     this.commandQuorumSize = Assert.arg(quorumSize, quorumSize > -1, "Quorum size must be -1 or greater");
@@ -372,7 +372,7 @@ public class CopycatConfig {
    *
    * @param quorumSize The required command quorum size.
    * @return The copycat configuration.
-   * @throws IllegalArgumentException if {@code quorumSize} is not > -1
+   * @throws IllegalArgumentException if {@code quorumSize} is not {@literal > -1}
    */
   public CopycatConfig withCommandQuorumSize(int quorumSize) {
     this.commandQuorumSize = Assert.arg(quorumSize, quorumSize > -1, "Quorum size must be -1 or greater");
@@ -533,7 +533,7 @@ public class CopycatConfig {
    * for inconsistent reads.
    *
    * @param quorumSize The required query quorum size.
-   * @throws IllegalArgumentException if {@code quorumSize} is not > -1
+   * @throws IllegalArgumentException if {@code quorumSize} is not {@literal > -1}
    */
   public void setQueryQuorumSize(int quorumSize) {
     this.queryQuorumSize = Assert.arg(quorumSize, quorumSize > -1, "Quorum size must be -1 or greater");
@@ -562,7 +562,7 @@ public class CopycatConfig {
    *
    * @param quorumSize The required query quorum size.
    * @return The copycat configuration.
-   * @throws IllegalArgumentException if {@code quorumSize} is not > -1
+   * @throws IllegalArgumentException if {@code quorumSize} is not {@literal > -1}
    */
   public CopycatConfig withQueryQuorumSize(int quorumSize) {
     this.queryQuorumSize = Assert.arg(quorumSize, quorumSize > -1, "Quorum size must be -1 or greater");
@@ -673,7 +673,7 @@ public class CopycatConfig {
    * This allows Copycat's logs to expand infinitely.
    *
    * @param maxSize The maximum local log size.
-   * @throws IllegalArgumentException if {@code maxSize} is not > 0
+   * @throws IllegalArgumentException if {@code maxSize} is not {@literal > 0}
    */
   public void setMaxLogSize(int maxSize) {
     this.maxLogSize = Assert.arg(maxSize, maxSize > 0, "Max log size must be positive");
@@ -703,7 +703,7 @@ public class CopycatConfig {
    *
    * @param maxSize The maximum local log size.
    * @return The replica configuration.
-   * @throws IllegalArgumentException if {@code maxSize} is not > 0
+   * @throws IllegalArgumentException if {@code maxSize} is not {@literal > 0}
    */
   public CopycatConfig withMaxLogSize(int maxSize) {
     this.maxLogSize = Assert.arg(maxSize, maxSize > 0, "Max log size must be positive");

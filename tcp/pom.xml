@@ -12,7 +12,7 @@
 
   <dependencies>
     <dependency>
-      <groupId>net.kuujo.copycat</groupId>
+      <groupId>org.onosproject</groupId>
       <artifactId>copycat</artifactId>
       <version>${project.version}</version>
     </dependency>
